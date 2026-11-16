@@ -1,0 +1,32 @@
+[project]
+name = "pdf-images-extract"
+version = "2.1.0"
+description = "Strumento avanzato per l'estrazione completa di risorse da PDF: immagini con trasparenza, font e sottinsiemi, profili colore ICC, dimensioni e metadati."
+authors = [
+    { name = "Linus74" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.5.1",
+    "customtkinter>=6.0.0",
+    "fonttools>=4.68.0",
+    "pikepdf>=10.18.2",
+    "pillow>=13.0.0",
+    "pyinstaller>=6.22.3",
+    "pymupdf>=2.1",
+    "rich>=15.0.0",
+    "tkinterdnd2>=0.7.0",
+]
+
+[project.scripts]
+pdf-extract = "pdf_images_extract.cli:main"
+pdf-images-extract = "pdf_images_extract.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

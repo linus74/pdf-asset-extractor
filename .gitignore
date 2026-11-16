@@ -1,0 +1,56 @@
+# Ambiente Python e dipendenze
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+build/
+dist/
+wheels/
+*.py[oc]
+__pycache__/
+
+# Output di elaborazione e file estratti
+output/
+extracted_*/
+*_estratto/
+*_extracted/
+*.icc
+*.ai
+*.svg
+*.ttf
+*.otf
+*.cff
+*.woff
+
+# Documenti PDF personali, segreti locali e dati di test
+*.pdf
+!tests/fixtures/*.pdf
+.env
+.env.*
+*.log
+
+# Cache di test e strumenti di sviluppo
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# File di configurazione IDE, editor e agenti
+.vscode/
+.idea/
+.gemini/
+.claude/
+.cursor/
+*.swp
+*.swo
+*~
+
+# File spazzatura di sistema (Windows / macOS)
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+._*
