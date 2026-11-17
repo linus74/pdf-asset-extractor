@@ -563,7 +563,7 @@ class PDFExtractorApp(BaseWindow):
         html_opt_row.pack(fill="x", padx=20, pady=(0, 6))
         self.chk_auto_open_html = ctk.CTkCheckBox(
             html_opt_row,
-            text="Apri automaticamente il Report HTML nel browser (modalità file singolo)",
+            text="Apri automaticamente il Report HTML nel browser al termine",
             font=ctk.CTkFont(size=11),
             text_color=PALETTE["text_muted"],
             checkbox_width=16,
@@ -1120,7 +1120,7 @@ class PDFExtractorApp(BaseWindow):
 
         self.open_dir_btn.configure(text="Apri Cartella Output")
         self.open_html_btn.pack(side="left", fill="x", expand=True)
-        self.open_html_btn.configure(state="normal" if res.get("html_report") else "disabled")
+        self.open_html_btn.configure(text="Apri Report HTML", state="normal" if res.get("html_report") else "disabled")
 
         self.results_card.pack(fill="x", padx=18, pady=(4, 14))
 
@@ -1160,10 +1160,14 @@ class PDFExtractorApp(BaseWindow):
         ]
         self._render_result_chips(chips_spec)
 
-        # In batch mode, focus on opening the parent directory containing all subfolders
-        self.open_html_btn.pack_forget()
+        # In batch mode, show both the parent folder button and the unified Batch HTML Index button
         self.open_dir_btn.configure(text="Apri Cartella Batch")
+        self.open_html_btn.pack(side="left", fill="x", expand=True)
+        self.open_html_btn.configure(text="Apri Report Batch HTML", state="normal" if res.get("html_report") else "disabled")
         self.results_card.pack(fill="x", padx=18, pady=(4, 14))
+
+        if self.chk_auto_open_html.get() and res.get("html_report"):
+            self._open_html_report()
 
     def _render_result_chips(self, chips_spec: list[tuple[str, Path]]):
         for label_txt, target_sub in chips_spec:

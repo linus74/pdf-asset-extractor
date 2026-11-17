@@ -175,6 +175,9 @@ def main(
     if not quiet:
         _print_batch_summary(batch_res)
 
+    if open_report and batch_res.get("html_report"):
+        webbrowser.open(Path(batch_res["html_report"]).as_uri())
+
     if batch_res["failed"] > 0 and batch_res["succeeded"] == 0:
         sys.exit(1)
 
@@ -251,13 +254,13 @@ def _print_batch_summary(batch_res: dict):
             tbl.add_row(item["file_name"], "[red]Errore[/red]", "-", item.get("error") or "")
 
     console.print(tbl)
-    console.print(
-        Panel(
-            f"[bold green]✓ Batch completato: {batch_res['succeeded']}/{batch_res['total_files']} PDF elaborati.[/bold green]\n"
-            f"📁 [bold]Cartella base output:[/bold] [cyan]{batch_res['output_directory']}[/cyan]",
-            border_style="green"
-        )
+    batch_panel = (
+        f"[bold green]✓ Batch completato: {batch_res['succeeded']}/{batch_res['total_files']} PDF elaborati.[/bold green]\n"
+        f"📁 [bold]Cartella base output:[/bold] [cyan]{batch_res['output_directory']}[/cyan]"
     )
+    if batch_res.get("html_report"):
+        batch_panel += f"\n🌐 [bold]Report Batch HTML:[/bold] [cyan]{batch_res['html_report']}[/cyan]"
+    console.print(Panel(batch_panel, border_style="green"))
 
 
 if __name__ == "__main__":

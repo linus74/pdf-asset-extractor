@@ -244,3 +244,25 @@ def test_batch_extraction(tmp_path):
     assert (out_base / "beta_estratto" / "report.json").exists()
     assert ("corrupt.pdf", "error") in statuses
     assert ("alpha.pdf", "success") in statuses
+
+
+def test_batch_html_report_and_non_overwrite(tmp_path):
+    in_dir = tmp_path / "batch_in"
+    in_dir.mkdir()
+    p1 = create_comprehensive_test_pdf(in_dir / "one.pdf")
+    p2 = create_comprehensive_test_pdf(in_dir / "two.pdf")
+
+    out_base = tmp_path / "batch_html_out"
+    b1 = extract_batch_pdfs([p1, p2], output_dir=out_base, generate_html=True)
+    b2 = extract_batch_pdfs([p1, p2], output_dir=out_base, generate_html=True)
+
+    r1 = Path(b1["html_report"])
+    r2 = Path(b2["html_report"])
+    assert r1.exists() and r1.name == "batch_report.html"
+    assert r2.exists() and r2.name == "batch_report_2.html"
+
+    html_txt = r1.read_text(encoding="utf-8")
+    assert "one_estratto/report.html" in html_txt
+    assert "two_estratto/report.html" in html_txt
+    assert "one.pdf" in html_txt
+    assert "two.pdf" in html_txt

@@ -18,7 +18,7 @@ from .extractors.profiles import extract_color_profiles
 from .extractors.attachments import extract_attachments
 from .extractors.vectors import extract_vectors
 from .reporters.json_reporter import generate_json_report
-from .reporters.html_reporter import generate_html_report
+from .reporters.html_reporter import generate_html_report, generate_batch_html_report
 from .utils.helpers import format_bytes, sanitize_filename
 from .utils.paper_sizes import identify_paper_size, points_to_mm
 
@@ -412,7 +412,7 @@ def extract_batch_pdfs(
         except Exception:
             pass
 
-    return {
+    batch_result: Dict[str, Any] = {
         "mode": "batch",
         "output_directory": str(base_dir),
         "total_files": total,
@@ -429,3 +429,9 @@ def extract_batch_pdfs(
             "attachments_count": agg_attachments,
         },
     }
+
+    if generate_html:
+        batch_html_path = generate_batch_html_report(batch_result, base_dir)
+        batch_result["html_report"] = str(batch_html_path)
+
+    return batch_result

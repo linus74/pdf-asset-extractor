@@ -79,6 +79,7 @@ Inside a single `.pdf` file, the original building blocks of the document often 
 
 7. **Dual Reporting**
    - `report.html`: Self-contained, offline interactive visual dashboard with modal image gallery, searchable tables, color swatches, and XMP XML inspector.
+   - `batch_report.html`: Unified Batch Index Dashboard generated when processing multiple PDFs, linking directly to every document's individual `report.html`.
    - `report.json`: Complete structured JSON manifest for automation and pipelines.
 
 ---

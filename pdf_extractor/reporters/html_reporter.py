@@ -5,6 +5,8 @@ Includes image gallery, font inspector, ICC profile viewer, page geometry explor
 
 import html
 import json
+from datetime import datetime
+from urllib.parse import quote
 from pathlib import Path
 from typing import Dict, Any
 
@@ -927,3 +929,293 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         f.write(html_template)
 
     return report_file
+
+
+def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> Path:
+    """
+    Renders a unified, offline-capable Batch Index Dashboard (`batch_report.html`,
+    or `batch_report_2.html`, ... if already present) in `output_dir`, linking cleanly
+    to every processed document's subfolder and individual `report.html`.
+    """
+    report_file = output_dir / "batch_report.html"
+    counter = 2
+    while report_file.exists():
+        report_file = output_dir / f"batch_report_{counter}.html"
+        counter += 1
+
+    total_files = batch_data.get("total_files", 0)
+    succeeded = batch_data.get("succeeded", 0)
+    failed = batch_data.get("failed", 0)
+    agg = batch_data.get("aggregate_summary", {})
+    items = batch_data.get("items", [])
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    status_badge = (
+        f'<span class="badge badge-success">{succeeded}/{total_files} Completati</span>'
+        if failed == 0
+        else f'<span class="badge badge-warning">{succeeded}/{total_files} OK · {failed} Errori</span>'
+    )
+
+    rows_html = []
+    for idx, item in enumerate(items, start=1):
+        fname = html.escape(item.get("file_name", ""))
+        src_full = html.escape(item.get("source_pdf", ""))
+        status = item.get("status", "error")
+
+        if status == "success":
+            s = item.get("summary") or {}
+            out_path = Path(item["output_directory"])
+            sub_name = out_path.name
+            sub_href = quote(sub_name)
+            has_individual_html = bool(item.get("html_report")) and Path(item["html_report"]).exists()
+
+            report_link = (
+                f'<a href="{sub_href}/report.html" class="btn-primary-sm">Apri Report PDF &rarr;</a>'
+                if has_individual_html
+                else '<span class="text-muted">HTML disattivato</span>'
+            )
+            folder_link = f'<a href="{sub_href}/" class="btn-sm">Cartella</a>'
+
+            rows_html.append(f"""
+            <tr class="batch-row" data-name="{fname.lower()}">
+              <td><span class="text-muted">{idx}</span></td>
+              <td>
+                <strong title="{src_full}">{fname}</strong>
+                <div class="text-muted font-code">&rarr; {html.escape(sub_name)}/</div>
+              </td>
+              <td><span class="badge badge-success">OK</span></td>
+              <td>{s.get("total_pages", 0)}</td>
+              <td>{s.get("total_images", 0)}</td>
+              <td>{s.get("vector_pages_count", 0)}</td>
+              <td>{s.get("embedded_fonts", 0)} / {s.get("total_fonts", 0)}</td>
+              <td>{s.get("color_profiles_count", 0)} / {s.get("attachments_count", 0)}</td>
+              <td>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  {report_link}
+                  {folder_link}
+                </div>
+              </td>
+            </tr>
+            """)
+        else:
+            err_msg = html.escape(item.get("error") or "Errore sconosciuto")
+            rows_html.append(f"""
+            <tr class="batch-row" data-name="{fname.lower()}">
+              <td><span class="text-muted">{idx}</span></td>
+              <td>
+                <strong title="{src_full}">{fname}</strong>
+                <div style="color:#fca5a5; font-size:12px;">{err_msg}</div>
+              </td>
+              <td><span class="badge badge-danger">Errore</span></td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td><span class="text-muted">-</span></td>
+            </tr>
+            """)
+
+    batch_html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch Extraction Summary — PDF Asset Extractor</title>
+  <style>
+    :root {{
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --radius: 12px;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      padding: 30px 20px;
+      line-height: 1.5;
+    }}
+    .container {{ max-width: 1360px; margin: 0 auto; }}
+    header {{
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 26px 30px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }}
+    h1 {{ font-size: 24px; font-weight: 700; color: #fff; }}
+    .sub {{ color: var(--text-muted); font-size: 13px; margin-top: 4px; }}
+    .badge {{
+      display: inline-block; padding: 4px 10px; border-radius: 9999px;
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+    }}
+    .badge-success {{ background: rgba(34, 197, 94, 0.2); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.4); }}
+    .badge-warning {{ background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4); }}
+    .badge-danger {{ background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }}
+    .kpi-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }}
+    .kpi-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }}
+    .kpi-val {{ font-size: 28px; font-weight: 800; color: var(--primary); margin-bottom: 4px; }}
+    .kpi-label {{ font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }}
+    .toolbar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .search-input {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--text-main);
+      padding: 8px 14px;
+      font-size: 14px;
+      width: 300px;
+      max-width: 100%;
+      outline: none;
+    }}
+    .search-input:focus {{ border-color: var(--primary); }}
+    .table-container {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      box-shadow: var(--shadow);
+    }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }}
+    th, td {{ padding: 12px 16px; border-bottom: 1px solid var(--card-border); }}
+    th {{ background: rgba(15, 23, 42, 0.7); font-weight: 600; color: #cbd5e1; }}
+    tr:last-child td {{ border-bottom: none; }}
+    tr:hover td {{ background: rgba(255, 255, 255, 0.02); }}
+    .btn-primary-sm {{
+      display: inline-block; padding: 5px 12px;
+      background: var(--primary); color: #0f172a;
+      border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 700;
+    }}
+    .btn-primary-sm:hover {{ background: #7dd3fc; }}
+    .btn-sm {{
+      display: inline-block; padding: 5px 10px;
+      background: rgba(56, 189, 248, 0.14); color: var(--primary);
+      border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600;
+    }}
+    .btn-sm:hover {{ background: var(--primary); color: #0f172a; }}
+    .text-muted {{ color: var(--text-muted); }}
+    .font-code {{ font-family: monospace; font-size: 12px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>📚 Riepilogo Elaborazione Batch</h1>
+        <div class="sub">Cartella base: <span class="font-code">{html.escape(str(output_dir))}</span> &bull; {timestamp}</div>
+      </div>
+      <div>{status_badge}</div>
+    </header>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-val">{succeeded}/{total_files}</div>
+        <div class="kpi-label">PDF Elaborati</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("total_pages", 0)}</div>
+        <div class="kpi-label">Pagine Totali</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("total_images", 0)}</div>
+        <div class="kpi-label">Immagini Estratte</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("vector_pages_count", 0)}</div>
+        <div class="kpi-label">Pagine Vettoriali</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("embedded_fonts", 0)}/{agg.get("total_fonts", 0)}</div>
+        <div class="kpi-label">Font Incorporati</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("color_profiles_count", 0)}</div>
+        <div class="kpi-label">Profili ICC</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val">{agg.get("attachments_count", 0)}</div>
+        <div class="kpi-label">Allegati</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <h2 style="font-size: 17px; font-weight: 600;">Documenti elaborati</h2>
+      <input type="text" id="filterInput" class="search-input" placeholder="Filtra documenti per nome..." oninput="filterRows()" />
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Documento PDF &amp; Sottocartella</th>
+            <th>Stato</th>
+            <th>Pagine</th>
+            <th>Immagini</th>
+            <th>Vettoriali</th>
+            <th>Font (Incorp.)</th>
+            <th>Profili / Allegati</th>
+            <th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          {"".join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+
+    <footer style="margin-top: 40px; padding: 20px; border-top: 1px solid var(--card-border); color: var(--text-muted); font-size: 12px; text-align: center;">
+      <p><strong>PDF Asset Extractor</strong> · by Linus74 &copy; 2026 &mdash; Uso responsabile: verifica i diritti d'autore e le licenze (EULA) delle risorse estratte.</p>
+    </footer>
+  </div>
+
+  <script>
+    function filterRows() {{
+      const q = document.getElementById('filterInput').value.toLowerCase().trim();
+      document.querySelectorAll('.batch-row').forEach(tr => {{
+        const name = tr.getAttribute('data-name') || '';
+        tr.style.display = name.includes(q) ? '' : 'none';
+      }});
+    }}
+  </script>
+</body>
+</html>
+"""
+
+    with open(report_file, "w", encoding="utf-8") as f:
+        f.write(batch_html)
+
+    return report_file
+
