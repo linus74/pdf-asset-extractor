@@ -26,6 +26,7 @@ extracted_*/
 # Documenti PDF personali, segreti locali e dati di test
 *.pdf
 !tests/fixtures/*.pdf
+!samples/*.pdf
 .env
 .env.*
 *.log

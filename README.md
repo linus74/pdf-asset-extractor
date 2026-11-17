@@ -4,6 +4,18 @@
 >
 > A modern Desktop App, CLI tool, and Python library to inspect PDF internals and extract embedded images (with true transparency), vector artwork (`.svg` & `.ai`), fonts (with SFNT table repair), ICC color profiles, spot inks, pre-press page geometry, attachments, and full metadata.
 
+<p align="center">
+  <img src="docs/screenshots/01_desktop_hero.png" alt="PDF Asset Extractor — Desktop App Dark Theme & Pre-Flight Preview" width="880" />
+</p>
+
+---
+
+## 📸 Interface & Report Showcase
+
+| Batch Queue (Light Mode) | Interactive Offline HTML Dashboard (`report.html`) |
+| :---: | :---: |
+| <img src="docs/screenshots/02_batch_light.png" alt="Batch Multi-PDF Queue in Light Mode" width="430" /> | <img src="docs/screenshots/03_html_dashboard.png" alt="Offline Interactive HTML Report Dashboard" width="430" /> |
+
 ---
 
 ## 🔍 What Is a PDF, Really?
@@ -105,6 +117,8 @@ output/  (or any base folder you select)
 
 ### 1. Desktop App (Windows Standalone)
 Double-click `dist\PDF-Extractor.exe` — or drag one or more PDF files (or a folder) directly onto the `.exe` icon or inside the application window.
+
+> **🧪 Want to test right away?** The [`samples/`](samples/) folder includes 3 lightweight, copyright-free synthetic PDFs (featuring transparent RGBA images, vector shapes, Apache 2.0 Roboto fonts, sRGB ICC profile, and an embedded CSV attachment) so you can drag & drop them immediately without using your own documents.
 
 ### 2. Run from Source with `uv`
 Requires **Python 3.11+** and [`uv`](https://docs.astral.sh/uv/):
