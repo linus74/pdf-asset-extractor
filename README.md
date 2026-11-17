@@ -1,6 +1,6 @@
 # PDF Asset & Metadata Deep Extractor
 
-> **v2.1 · by Linus74 © 2026**
+> **v2.2 · by Linus74 © 2026**
 >
 > A modern Desktop App, CLI tool, and Python library to inspect PDF internals and extract embedded images (with true transparency), vector artwork (`.svg` & `.ai`), fonts (with SFNT table repair), ICC color profiles, spot inks, pre-press page geometry, attachments, and full metadata.
 

@@ -1,6 +1,6 @@
 [project]
 name = "pdf-images-extract"
-version = "2.1.0"
+version = "2.2.0"
 description = "Strumento avanzato per l'estrazione completa di risorse da PDF: immagini con trasparenza, font e sottinsiemi, profili colore ICC, dimensioni e metadati."
 authors = [
     { name = "Linus74" }
