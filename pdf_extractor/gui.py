@@ -1,5 +1,5 @@
 """
-Modern Studio-Grade Desktop GUI (v2.2) for PDF Deep Asset & Metadata Extractor.
+Modern Studio-Grade Desktop GUI (v2.3) for PDF Deep Asset & Metadata Extractor.
 Features horizontal Split-View layout, Single-PDF Pre-Flight thumbnail preview,
 seamless multi-PDF / folder Batch Queue, 1-click presets, crisp adaptive icons,
 Light/Dark theme toggle, deterministic progress, and clickable folder result badges.
@@ -160,7 +160,7 @@ class PDFExtractorApp(BaseWindow):
 
         self.ver_badge = ctk.CTkLabel(
             self.brand_frame,
-            text="v2.2",
+            text="v2.3",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color=PALETTE["badge_bg"],
             text_color=PALETTE["text_muted"],

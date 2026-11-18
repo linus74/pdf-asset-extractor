@@ -2,7 +2,7 @@
 
 All notable changes to **PDF Asset Extractor** will be documented in this file.
 
-## [2.2.0] - 2026-11-18
+## [2.3.0] - 2026-11-18
 
 ### Added
 - **Internationalization (i18n — English & Italian)**:
@@ -10,15 +10,20 @@ All notable changes to **PDF Asset Extractor** will be documented in this file.
   - **Live GUI Language Switcher (`EN` / `IT`)** in the header bar that switches every label, preset (`Full`/`Graphics`/`Fonts`/`Audit Only` <-> `Completo`/`Solo Grafica`/`Solo Font`/`Solo Analisi`), switch, progress message, dialog, and result chip instantly without restarting.
   - **Localized HTML Dashboards & Folders**: Both `report.html` and `batch_report.html` are now generated in the active language, and output subfolders adapt cleanly (`<name>_extracted` in English, `<name>_estratto` in Italian).
   - **CLI `--lang` Option**: Added `--lang [en|it]` flag alongside localized CLI help, progress spinners, and Rich summary tables.
+- **Automated Tests**: Added `test_i18n_translations_and_locale_folders` verifying `EN`/`IT` key parity, localized subfolder suffixes, and localized HTML reports.
+
+## [2.2.0] - 2026-11-17
+
+### Added
 - **Unified Batch HTML Index (`batch_report.html`)**: Running a multi-PDF batch with HTML reporting enabled now generates a self-contained `batch_report.html` summary dashboard in the base output directory.
   - Displays aggregate KPI cards across the entire batch (processed PDFs, total pages, images, vector pages, embedded fonts, ICC profiles, attachments).
-  - Includes a live filename search/filter bar and per-document table with `OK` / `Error` status, direct relative links (`Open PDF Report →` / `Apri Report PDF →`) to each individual `<name>_extracted/report.html` (or `_estratto`), and folder links.
+  - Includes a live filename search/filter bar and per-document table with `OK` / `Error` status, direct relative links (`Apri Report PDF →`) to each individual `<name>_estratto/report.html`, and folder links.
   - Anti-overwrite incremental naming (`batch_report_2.html`, `batch_report_3.html`, ...) when running multiple batches into the same folder.
 - **Batch HTML Auto-Open & GUI Button**:
-  - Updated the *"Automatically open HTML Report in browser when done"* checkbox to work seamlessly for both single-PDF and Batch extractions.
-  - Added the **`Open Batch HTML Report`** button directly in the Batch completion panel.
+  - Updated the *"Apri automaticamente il Report HTML nel browser al termine"* checkbox to work seamlessly for both single-PDF and Batch extractions.
+  - Added the **`Apri Report Batch HTML`** button directly in the Batch completion panel.
 - **CLI Batch `--open` Support**: Passing `--open` with multiple PDFs or a directory now prints the `batch_report.html` path and opens it automatically in the default browser.
-- **Automated Tests**: Added `test_batch_html_report_and_non_overwrite` and `test_i18n_translations_and_locale_folders` verifying translation parity, locale folders, localized HTML reports, and batch index incremental naming.
+- **Automated Tests**: Added `test_batch_html_report_and_non_overwrite` verifying batch index HTML generation, relative links, and incremental naming.
 
 ## [2.1.0] - 2026-11-17
 
