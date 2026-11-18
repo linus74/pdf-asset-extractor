@@ -20,17 +20,19 @@ from .extractors.vectors import extract_vectors
 from .reporters.json_reporter import generate_json_report
 from .reporters.html_reporter import generate_html_report, generate_batch_html_report
 from .utils.helpers import format_bytes, sanitize_filename
+from .utils.i18n import tr
 from .utils.paper_sizes import identify_paper_size, points_to_mm
 
 
-def resolve_unique_output_dir(base_dir: Path, pdf_stem: str) -> Path:
+def resolve_unique_output_dir(base_dir: Path, pdf_stem: str, lang: str = "en") -> Path:
     """
-    Creates a unique parent folder inside `base_dir` named `<safe_stem>_estratto`
-    (or `<safe_stem>_estratto_2`, `_3`, ... if it already exists) to prevent
-    overwriting existing files in `base_dir`.
+    Creates a unique parent folder inside `base_dir` named `<safe_stem>_extracted`
+    (or `<safe_stem>_estratto` in Italian, with `_2`, `_3`, ... if it already exists)
+    to prevent overwriting existing files in `base_dir`.
     """
     safe_stem = sanitize_filename(pdf_stem, max_length=80, fallback="pdf")
-    folder_base = f"{safe_stem}_estratto"
+    suffix = tr(lang, "folder_suffix")
+    folder_base = f"{safe_stem}{suffix}"
     candidate = base_dir / folder_base
     counter = 2
     while candidate.exists():
@@ -123,12 +125,14 @@ def extract_pdf_assets(
     password: Optional[str] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None,
     create_subfolder: bool = True,
+    lang: str = "en",
 ) -> Dict[str, Any]:
     """
     Main extraction pipeline.
     Extracts all images, fonts, color profiles, attachments, geometry, and metadata.
     When `create_subfolder=True` (default), creates a dedicated unique folder
-    `<pdf_stem>_estratto` (or `_2`, `_3`, ...) inside `output_dir` (which defaults to `./output`).
+    `<pdf_stem>_extracted` (or `_estratto` for `lang="it"`, with `_2`, `_3`, ...)
+    inside `output_dir` (which defaults to `./output`).
     """
     def _report(msg: str, pct: float):
         if progress_callback:
@@ -143,13 +147,13 @@ def extract_pdf_assets(
 
     base_dir = (Path.cwd() / "output") if output_dir is None else Path(output_dir).resolve()
     if create_subfolder:
-        output_dir = resolve_unique_output_dir(base_dir, pdf_file.stem)
+        output_dir = resolve_unique_output_dir(base_dir, pdf_file.stem, lang=lang)
     else:
         output_dir = base_dir
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    _report("Apertura documento PDF...", 0.05)
+    _report(tr(lang, "prog_open"), 0.05)
 
     # 1. Open with PyMuPDF
     doc = pymupdf.open(str(pdf_file))
@@ -157,7 +161,7 @@ def extract_pdf_assets(
         auth = doc.authenticate(password or "")
         if not auth:
             doc.close()
-            raise PermissionError("Il PDF è protetto da password. Inserisci una password valida per procedere.")
+            raise PermissionError(tr(lang, "err_pwd_required"))
 
     # 2. Open with pikepdf for low-level inspection
     pike_doc = None
@@ -171,41 +175,41 @@ def extract_pdf_assets(
 
     try:
         # Extract metadata and document generation details
-        _report("Estrazione metadati e informazioni software...", 0.12)
+        _report(tr(lang, "prog_meta"), 0.12)
         metadata = extract_metadata(doc, pike_doc, output_dir)
 
         # Extract page geometry and prepress boxes
-        _report("Analisi geometria pagine e formato...", 0.22)
+        _report(tr(lang, "prog_geom"), 0.22)
         pages = extract_pages_geometry(doc, pike_doc)
 
         # Extract images
         images = []
         if extract_imgs:
-            _report("Estrazione immagini e ricostruzione trasparenza...", 0.35)
+            _report(tr(lang, "prog_imgs"), 0.35)
             images = extract_images(doc, output_dir)
 
         # Extract vector graphics (.svg and .ai)
         vectors = []
         if extract_vecs:
-            _report("Estrazione grafica vettoriale (.SVG / .AI)...", 0.55)
+            _report(tr(lang, "prog_vecs"), 0.55)
             vectors = extract_vectors(doc, output_dir)
 
         # Extract fonts
         fonts = []
         if extract_fnts:
-            _report("Recupero e riparazione font incorporati...", 0.72)
+            _report(tr(lang, "prog_fonts"), 0.72)
             fonts = extract_fonts(doc, output_dir)
 
         # Extract color profiles & spot colors
         color_data = {"profiles": [], "spot_colors": []}
         if extract_profs and pike_doc:
-            _report("Analisi profili colore ICC e inchiostri spot...", 0.85)
+            _report(tr(lang, "prog_profs"), 0.85)
             color_data = extract_color_profiles(pike_doc, output_dir)
 
         # Extract attachments
         attachments = []
         if extract_attaches:
-            _report("Estrazione file allegati...", 0.91)
+            _report(tr(lang, "prog_attach"), 0.91)
             attachments = extract_attachments(doc, output_dir)
 
         # Compute summary
@@ -251,16 +255,16 @@ def extract_pdf_assets(
         }
 
         # Generate JSON report
-        _report("Salvataggio report JSON e dashboard HTML...", 0.96)
+        _report(tr(lang, "prog_reports"), 0.96)
         json_path = generate_json_report(result, output_dir)
         result["json_report"] = str(json_path)
 
         # Generate HTML report
         if generate_html:
-            html_path = generate_html_report(result, output_dir)
+            html_path = generate_html_report(result, output_dir, lang=lang)
             result["html_report"] = str(html_path)
 
-        _report("Estrazione completata!", 1.0)
+        _report(tr(lang, "prog_done"), 1.0)
         return result
 
     finally:
@@ -309,6 +313,7 @@ def extract_batch_pdfs(
     password: Optional[str] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None,
     item_callback: Optional[Callable[[int, int, Path, str, Any], None]] = None,
+    lang: str = "en",
 ) -> Dict[str, Any]:
     """
     Processes multiple PDF files sequentially into isolated `<stem>_estratto`
@@ -360,6 +365,7 @@ def extract_batch_pdfs(
                 password=password,
                 progress_callback=_per_file_progress,
                 create_subfolder=True,
+                lang=lang,
             )
             succeeded += 1
             s = res["summary"]
@@ -408,7 +414,7 @@ def extract_batch_pdfs(
 
     if progress_callback:
         try:
-            progress_callback(f"Batch completato: {succeeded}/{total} PDF elaborati.", 1.0)
+            progress_callback(tr(lang, "prog_batch_done", s=succeeded, t=total), 1.0)
         except Exception:
             pass
 
@@ -431,7 +437,7 @@ def extract_batch_pdfs(
     }
 
     if generate_html:
-        batch_html_path = generate_batch_html_report(batch_result, base_dir)
+        batch_html_path = generate_batch_html_report(batch_result, base_dir, lang=lang)
         batch_result["html_report"] = str(batch_html_path)
 
     return batch_result

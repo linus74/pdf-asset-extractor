@@ -10,6 +10,13 @@ from .helpers import (
     format_bytes,
     compute_sha256,
 )
+from .i18n import (
+    tr,
+    get_default_language,
+    load_preferences,
+    save_preferences,
+    SUPPORTED_LANGS,
+)
 
 __all__ = [
     "identify_paper_size",
@@ -20,4 +27,9 @@ __all__ = [
     "sanitize_filename",
     "format_bytes",
     "compute_sha256",
+    "tr",
+    "get_default_language",
+    "load_preferences",
+    "save_preferences",
+    "SUPPORTED_LANGS",
 ]

@@ -9,9 +9,10 @@ from datetime import datetime
 from urllib.parse import quote
 from pathlib import Path
 from typing import Dict, Any
+from ..utils.i18n import tr
 
 
-def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
+def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en") -> Path:
     """
     Renders standalone interactive HTML report to `output_dir / "report.html"`.
     """
@@ -27,12 +28,14 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     attachments = data.get("attachments", [])
     summary = data.get("summary", {})
 
+    t = lambda k, **kw: tr(lang, k, **kw)
+
     title = html.escape(doc_info.get("title") or Path(data.get("source_pdf", "Document")).name)
-    creator = html.escape(doc_info.get("creator") or "Non specificato")
-    producer = html.escape(doc_info.get("producer") or "Non specificato")
+    creator = html.escape(doc_info.get("creator") or t("html_not_specified"))
+    producer = html.escape(doc_info.get("producer") or t("html_not_specified"))
     pdf_version = html.escape(doc_info.get("pdf_version") or doc_info.get("pdf_format") or "PDF")
-    created = html.escape(doc_info.get("creation_date") or doc_info.get("creation_date_raw") or "N/D")
-    modified = html.escape(doc_info.get("modification_date") or doc_info.get("modification_date_raw") or "N/D")
+    created = html.escape(doc_info.get("creation_date") or doc_info.get("creation_date_raw") or "N/A")
+    modified = html.escape(doc_info.get("modification_date") or doc_info.get("modification_date_raw") or "N/A")
 
     standards = doc_info.get("standards", {})
     std_badges = []
@@ -46,9 +49,9 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     # Security badge
     sec = doc_info.get("security", {})
     sec_badge = (
-        '<span class="badge badge-danger">Protetto da Password / Crittografato</span>'
+        f'<span class="badge badge-danger">{t("html_encrypted")}</span>'
         if sec.get("is_encrypted")
-        else '<span class="badge badge-success">Nessuna Crittografia (Aperto)</span>'
+        else f'<span class="badge badge-success">{t("html_open")}</span>'
     )
 
     # Images cards HTML
@@ -60,9 +63,9 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         h = img.get("height", 0)
         cs = html.escape(str(img.get("colorspace", "")))
         sz = html.escape(img.get("file_size", ""))
-        alpha = "Sì (SMask)" if img.get("has_transparency") else "No"
+        alpha = t("yes_smask") if img.get("has_transparency") else t("no")
         dpi_val = img.get("effective_dpi")
-        dpi_badge = f'<span class="tag tag-dpi">{dpi_val} DPI</span>' if dpi_val else '<span class="tag">DPI N/D</span>'
+        dpi_badge = f'<span class="tag tag-dpi">{dpi_val} DPI</span>' if dpi_val else '<span class="tag">DPI N/A</span>'
         pages_str = ", ".join(str(p) for p in img.get("pages", []))
 
         images_cards_html.append(f"""
@@ -77,13 +80,13 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
             </div>
             <div class="card-title-text" title="{f_name}">{Path(f_name).name}</div>
             <div class="card-meta-grid">
-              <div><strong>Dim.:</strong> {w} &times; {h} px</div>
-              <div><strong>Peso:</strong> {sz}</div>
-              <div><strong>Spazio:</strong> {cs}</div>
-              <div><strong>Alpha:</strong> {alpha}</div>
+              <div><strong>{t("img_dims")}</strong> {w} &times; {h} px</div>
+              <div><strong>{t("img_weight")}</strong> {sz}</div>
+              <div><strong>{t("img_space")}</strong> {cs}</div>
+              <div><strong>{t("img_alpha")}</strong> {alpha}</div>
             </div>
-            <div class="card-footer-pages">Pagine: {pages_str}</div>
-            <a href="{f_name}" download class="btn-download" onclick="event.stopPropagation()">Scarica Immagine</a>
+            <div class="card-footer-pages">{t("img_pages")} {pages_str}</div>
+            <a href="{f_name}" download class="btn-download" onclick="event.stopPropagation()">{t("btn_dl_img")}</a>
           </div>
         </div>
         """)
@@ -94,13 +97,10 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         base = html.escape(f.get("basefont", ""))
         clean = html.escape(f.get("clean_name", ""))
         sub = html.escape(f.get("subtype", ""))
-        enc = html.escape(f.get("encoding", ""))
-        is_sub = f.get("is_subset", False)
-        sub_tag = html.escape(f.get("subset_tag") or "")
         is_emb = f.get("is_embedded", False)
         saved = f.get("saved_file")
         glyphs = f.get("glyph_count")
-        glyphs_str = str(glyphs) if glyphs is not None else "N/D"
+        glyphs_str = str(glyphs) if glyphs is not None else "N/A"
         sz_str = f.get("file_size") or "-"
         pages_str = ", ".join(str(p) for p in f.get("pages", []))
 
@@ -109,25 +109,24 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         chars_cnt = f.get("chars_count", 0)
 
         if inst_status == "full":
-            status_badge = '<span class="badge badge-success" title="Installabile e utilizzabile al 100% per qualsiasi testo">🟢 Font Completo</span>'
+            status_badge = f'<span class="badge badge-success">🟢 {t("font_full")}</span>'
         elif inst_status == "subset":
-            status_badge = f'<span class="badge badge-warning" title="Installabile nel sistema operativo, ma contiene solo i glifi estratti dal PDF">🟡 Sottinsieme ({chars_cnt} caratteri)</span>'
+            status_badge = f'<span class="badge badge-warning">🟡 {t("font_subset", n=chars_cnt)}</span>'
         elif is_emb:
-            status_badge = '<span class="badge badge-info">Incorporato</span>'
+            status_badge = f'<span class="badge badge-info">{t("font_embedded")}</span>'
         else:
-            status_badge = '<span class="badge badge-neutral">Di Sistema (Non estraibile)</span>'
+            status_badge = f'<span class="badge badge-neutral">{t("font_system")}</span>'
 
-        dl_link = f'<a href="{saved}" download class="btn-sm">Scarica ({Path(saved).suffix})</a>' if saved else '<span class="text-muted">-</span>'
-
-        sample_box = f'<div class="chars-sample-box font-code" title="Campione caratteri disponibili: {chars_sample}">{chars_sample}</div>' if chars_sample else '<span class="text-muted font-code">-</span>'
+        dl_link = f'<a href="{saved}" download class="btn-sm">{t("dl_font", ext=Path(saved).suffix)}</a>' if saved else '<span class="text-muted">-</span>'
+        sample_box = f'<div class="chars-sample-box font-code" title="{chars_sample}">{chars_sample}</div>' if chars_sample else '<span class="text-muted font-code">-</span>'
 
         flags_obj = f.get("flags", {})
         flag_tags = []
-        if flags_obj.get("italic"): flag_tags.append("Corsivo")
-        if flags_obj.get("force_bold"): flag_tags.append("Grassetto")
-        if flags_obj.get("fixed_pitch"): flag_tags.append("Monospazio")
+        if flags_obj.get("italic"): flag_tags.append(t("font_italic"))
+        if flags_obj.get("force_bold"): flag_tags.append(t("font_bold"))
+        if flags_obj.get("fixed_pitch"): flag_tags.append(t("font_mono"))
         if flags_obj.get("serif"): flag_tags.append("Serif")
-        flags_str = ", ".join(flag_tags) if flag_tags else "Normale"
+        flags_str = ", ".join(flag_tags) if flag_tags else t("font_normal")
 
         fonts_rows_html.append(f"""
         <tr>
@@ -162,7 +161,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
           <td>{p_dev}</td>
           <td>{p_ver}</td>
           <td>{p_sz}</td>
-          <td><a href="{p_file}" download class="btn-sm">Scarica .ICC</a></td>
+          <td><a href="{p_file}" download class="btn-sm">{t("dl_icc")}</a></td>
         </tr>
         """)
 
@@ -171,7 +170,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     for sc in spot_colors:
         spot_tags_html.append(f'<div class="spot-color-pill"><span class="spot-indicator"></span> {html.escape(sc)}</div>')
     if not spot_tags_html:
-        spot_tags_html.append('<div class="text-muted">Nessun colore speciale / spot rilevato nel documento.</div>')
+        spot_tags_html.append(f'<div class="text-muted">{t("empty_spots")}</div>')
 
     # Pages rows HTML
     pages_rows_html = []
@@ -184,7 +183,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         tb = pg.get("trimbox") or {}
         bb = pg.get("bleedbox") or {}
 
-        mb_name = html.escape(mb.get("matched_size", "N/D"))
+        mb_name = html.escape(mb.get("matched_size", "N/A"))
         mb_orient = html.escape(mb.get("orientation", ""))
         mb_mm = f"{mb.get('width_mm', 0)} &times; {mb.get('height_mm', 0)} mm"
         mb_pt = f"{mb.get('width_pt', 0)} &times; {mb.get('height_pt', 0)} pt"
@@ -200,7 +199,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
 
         pages_rows_html.append(f"""
         <tr>
-          <td><strong>Pagina {p_num}</strong> ({p_lbl})</td>
+          <td><strong>{t("page_word")} {p_num}</strong> ({p_lbl})</td>
           <td>
             <strong>{mb_name}</strong> ({mb_orient})
             <div class="text-muted">{mb_mm} &bull; {mb_pt}</div>
@@ -229,7 +228,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
           <td>{a_desc or '<span class=\"text-muted\">-</span>'}</td>
           <td>{a_sz}</td>
           <td>{a_src}</td>
-          <td><a href="{a_file}" download class="btn-sm">Scarica File</a></td>
+          <td><a href="{a_file}" download class="btn-sm">{t("dl_file")}</a></td>
         </tr>
         """)
 
@@ -252,14 +251,14 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
             swatches.append(f'<span class="color-dot" style="background-color: {html.escape(hex_col)};" title="{html.escape(hex_col)}"></span>')
         swatches_html = "".join(swatches) if swatches else '<span class="text-muted">-</span>'
 
-        dl_svg = f'<a href="{svg_f}" download class="btn-sm">Scarica .SVG ({svg_sz})</a>' if svg_f else "-"
-        dl_ai = f'<a href="{ai_f}" download class="btn-sm" style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4);">Scarica .AI ({ai_sz})</a>' if ai_f else "-"
+        dl_svg = f'<a href="{svg_f}" download class="btn-sm">{t("dl_svg", sz=svg_sz)}</a>' if svg_f else "-"
+        dl_ai = f'<a href="{ai_f}" download class="btn-sm" style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4);">{t("dl_ai", sz=ai_sz)}</a>' if ai_f else "-"
 
         vectors_rows_html.append(f"""
         <tr>
-          <td><strong>Pagina {p_num}</strong></td>
-          <td><span class="badge badge-accent">{paths_c} tracciati</span></td>
-          <td><small>Curve B&eacute;zier: {curves_c} &bull; Linee: {lines_c} &bull; Rettangoli: {rects_c}</small></td>
+          <td><strong>{t("page_word")} {p_num}</strong></td>
+          <td><span class="badge badge-accent">{t("paths_label", n=paths_c)}</span></td>
+          <td><small>{t("vec_detail_fmt", c=curves_c, l=lines_c, r=rects_c)}</small></td>
           <td><div class="swatches-wrap">{swatches_html}</div></td>
           <td>
             <div style="display:flex; gap:8px;">
@@ -278,14 +277,14 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
             with open(xmp_path, "r", encoding="utf-8", errors="ignore") as f:
                 xmp_content = html.escape(f.read())
         except Exception:
-            xmp_content = "Impossibile leggere file XMP."
+            xmp_content = "XMP read error."
 
     html_template = f"""<!DOCTYPE html>
-<html lang="it">
+<html lang="{html.escape(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Asset & Metadata Report: {title}</title>
+  <title>{t("html_doc_title")}: {title}</title>
   <style>
     :root {{
       --bg: #0f172a;
@@ -736,7 +735,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
       <div class="header-top">
         <div>
           <h1>📄 {title}</h1>
-          <p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">Report Completo di Estrazione Risorse e Metadati</p>
+          <p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">{t("html_doc_sub")}</p>
         </div>
         <div class="header-badges">
           <span class="badge badge-info">{pdf_version}</span>
@@ -746,12 +745,12 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
       </div>
 
       <div class="meta-grid">
-        <div class="meta-item"><strong>Software di Creazione:</strong> {creator}</div>
-        <div class="meta-item"><strong>Motore di Generazione (Producer):</strong> {producer}</div>
-        <div class="meta-item"><strong>Data di Creazione:</strong> {created}</div>
-        <div class="meta-item"><strong>Ultima Modifica:</strong> {modified}</div>
-        <div class="meta-item"><strong>Autore / Soggetto:</strong> {html.escape(doc_info.get("author") or "N/D")} / {html.escape(doc_info.get("subject") or "N/D")}</div>
-        <div class="meta-item"><strong>Trapped:</strong> {html.escape(str(doc_info.get("trapped") or "Non definito"))}</div>
+        <div class="meta-item"><strong>{t("html_creator")}</strong> {creator}</div>
+        <div class="meta-item"><strong>{t("html_producer")}</strong> {producer}</div>
+        <div class="meta-item"><strong>{t("html_created")}</strong> {created}</div>
+        <div class="meta-item"><strong>{t("html_modified")}</strong> {modified}</div>
+        <div class="meta-item"><strong>{t("html_author_subj")}</strong> {html.escape(doc_info.get("author") or "N/A")} / {html.escape(doc_info.get("subject") or "N/A")}</div>
+        <div class="meta-item"><strong>{t("html_trapped")}</strong> {html.escape(str(doc_info.get("trapped") or t("html_not_defined")))}</div>
       </div>
     </header>
 
@@ -759,74 +758,70 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-val">{summary.get("total_pages", len(pages))}</div>
-        <div class="kpi-label">Pagine Totali</div>
+        <div class="kpi-label">{t("kpi_pages")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{summary.get("total_images", len(images))}</div>
-        <div class="kpi-label">Immagini Estratte</div>
+        <div class="kpi-label">{t("kpi_images")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{len(vectors)}</div>
-        <div class="kpi-label">Vettoriali (.SVG / .AI)</div>
+        <div class="kpi-label">{t("kpi_vectors")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{summary.get("total_fonts", len(fonts))}</div>
-        <div class="kpi-label">Font Censiti ({summary.get("embedded_fonts", 0)} incorporati)</div>
+        <div class="kpi-label">{t("kpi_fonts", e=summary.get("embedded_fonts", 0))}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{len(profiles)}</div>
-        <div class="kpi-label">Profili ICC</div>
+        <div class="kpi-label">{t("kpi_profiles")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{len(spot_colors)}</div>
-        <div class="kpi-label">Colori Speciali (Spot)</div>
+        <div class="kpi-label">{t("kpi_spots")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{len(attachments)}</div>
-        <div class="kpi-label">File Allegati</div>
+        <div class="kpi-label">{t("kpi_attachments")}</div>
       </div>
     </div>
 
     <!-- TABS NAVIGATION -->
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="showTab('images')">🖼️ Immagini ({len(images)})</button>
-      <button class="tab-btn" onclick="showTab('vectors')">📐 Vettoriali ({len(vectors)})</button>
-      <button class="tab-btn" onclick="showTab('fonts')">🔤 Font ({len(fonts)})</button>
-      <button class="tab-btn" onclick="showTab('profiles')">🎨 Profili Colore & Inchiostri</button>
-      <button class="tab-btn" onclick="showTab('pages')">📏 Dimensioni & Pre-stampa ({len(pages)})</button>
-      <button class="tab-btn" onclick="showTab('attachments')">📎 Allegati ({len(attachments)})</button>
-      <button class="tab-btn" onclick="showTab('xmp')">ℹ️ Metadati & XMP</button>
+      <button class="tab-btn active" onclick="showTab('images')">🖼️ {t("tab_images")} ({len(images)})</button>
+      <button class="tab-btn" onclick="showTab('vectors')">📐 {t("tab_vectors")} ({len(vectors)})</button>
+      <button class="tab-btn" onclick="showTab('fonts')">🔤 {t("tab_fonts")} ({len(fonts)})</button>
+      <button class="tab-btn" onclick="showTab('profiles')">🎨 {t("tab_profiles")}</button>
+      <button class="tab-btn" onclick="showTab('pages')">📏 {t("tab_pages")} ({len(pages)})</button>
+      <button class="tab-btn" onclick="showTab('attachments')">📎 {t("tab_attachments")} ({len(attachments)})</button>
+      <button class="tab-btn" onclick="showTab('xmp')">ℹ️ {t("tab_xmp")}</button>
     </div>
 
     <!-- TAB: IMAGES -->
     <div id="tab-images" class="tab-pane active">
-      {'<div class="gallery-grid">' + ''.join(images_cards_html) + '</div>' if images_cards_html else '<div class="empty-state">Nessuna immagine raster incorporata trovata in questo PDF.</div>'}
+      {'<div class="gallery-grid">' + ''.join(images_cards_html) + '</div>' if images_cards_html else f'<div class="empty-state">{t("empty_images")}</div>'}
     </div>
 
     <!-- TAB: VECTORS -->
     <div id="tab-vectors" class="tab-pane">
-      <h3 style="margin-bottom: 8px; font-size: 18px;">Grafica Vettoriale Estratta (.SVG e Adobe Illustrator .AI)</h3>
-      <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">
-        I file <strong>.SVG</strong> sono universali (compatibili con Figma, Illustrator, Inkscape e Web). I file <strong>.AI</strong> contengono la grafica vettoriale pura senza elementi raster, apribili nativamente in Adobe Illustrator con tutti i tracciati modificabili.
-      </p>
-      {'<div class="table-container"><table><thead><tr><th>Pagina</th><th>Tracciati Totali</th><th>Dettaglio Geometria</th><th>Colori Rilevati</th><th>Download</th></tr></thead><tbody>' + ''.join(vectors_rows_html) + '</tbody></table></div>' if vectors_rows_html else '<div class="empty-state">Nessuna grafica vettoriale rilevata nel PDF.</div>'}
+      <h3 style="margin-bottom: 8px; font-size: 18px;">{t("vec_heading")}</h3>
+      <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">{t("vec_desc")}</p>
+      {'<div class="table-container"><table><thead><tr><th>' + t("th_page") + '</th><th>' + t("th_paths") + '</th><th>' + t("th_geom_detail") + '</th><th>' + t("th_colors") + '</th><th>' + t("th_download") + '</th></tr></thead><tbody>' + ''.join(vectors_rows_html) + '</tbody></table></div>' if vectors_rows_html else f'<div class="empty-state">{t("empty_vectors")}</div>'}
     </div>
 
     <!-- TAB: FONTS -->
     <div id="tab-fonts" class="tab-pane">
-      <h3 style="margin-bottom: 6px; font-size: 18px;">Font & Tipografia Censiti</h3>
-      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 18px;">
-        I font con stato <strong>🟢 Font Completo</strong> contengono l'intero alfabeto e sono utilizzabili liberamente per comporre qualsiasi testo. I font con stato <strong>🟡 Sottinsieme</strong> contengono esclusivamente i caratteri digitati nel documento originario (tutti gli altri caratteri daranno un glifo vuoto); il nostro tool li convalida e ripara per renderli installabili nel sistema operativo.
-      </p>
-      {'<div class="table-container"><table><thead><tr><th>Nome Font</th><th>Tipo</th><th>Stato & Installabilità</th><th>Campione Caratteri</th><th>Glifi</th><th>Dimensione</th><th>Attributi</th><th>Pagine</th><th>Download</th></tr></thead><tbody>' + ''.join(fonts_rows_html) + '</tbody></table></div>' if fonts_rows_html else '<div class="empty-state">Nessun font rilevato nel PDF.</div>'}
+      <h3 style="margin-bottom: 6px; font-size: 18px;">{t("font_heading")}</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 18px;">{t("font_desc")}</p>
+      {'<div class="table-container"><table><thead><tr><th>' + t("th_font_name") + '</th><th>' + t("th_type") + '</th><th>' + t("th_install_status") + '</th><th>' + t("th_char_sample") + '</th><th>' + t("th_glyphs") + '</th><th>' + t("th_size") + '</th><th>' + t("th_attrs") + '</th><th>' + t("th_pages") + '</th><th>' + t("th_download") + '</th></tr></thead><tbody>' + ''.join(fonts_rows_html) + '</tbody></table></div>' if fonts_rows_html else f'<div class="empty-state">{t("empty_fonts")}</div>'}
     </div>
 
     <!-- TAB: PROFILES -->
     <div id="tab-profiles" class="tab-pane">
-      <h3 style="margin-bottom: 12px; font-size: 18px;">Profili ICC Incorporati</h3>
-      {'<div class="table-container"><table><thead><tr><th>Descrizione Profilo</th><th>Spazio Colore</th><th>Classe Dispositivo</th><th>Versione</th><th>Dimensione</th><th>Download</th></tr></thead><tbody>' + ''.join(profiles_rows_html) + '</tbody></table></div>' if profiles_rows_html else '<div class="empty-state" style="padding:20px 0;">Nessun profilo ICC incorporato esplicitamente trovato.</div>'}
+      <h3 style="margin-bottom: 12px; font-size: 18px;">{t("prof_heading")}</h3>
+      {'<div class="table-container"><table><thead><tr><th>' + t("th_prof_desc") + '</th><th>' + t("th_cs") + '</th><th>' + t("th_dev_class") + '</th><th>' + t("th_ver") + '</th><th>' + t("th_size") + '</th><th>' + t("th_download") + '</th></tr></thead><tbody>' + ''.join(profiles_rows_html) + '</tbody></table></div>' if profiles_rows_html else f'<div class="empty-state" style="padding:20px 0;">{t("empty_profiles")}</div>'}
 
-      <h3 style="margin-top: 35px; margin-bottom: 10px; font-size: 18px;">Colori Speciali (Spot Colors / Separations)</h3>
+      <h3 style="margin-top: 35px; margin-bottom: 10px; font-size: 18px;">{t("spot_heading")}</h3>
       <div class="spot-colors-container">
         {''.join(spot_tags_html)}
       </div>
@@ -838,15 +833,15 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
         <table>
           <thead>
             <tr>
-              <th>Pagina</th>
-              <th>Formato & MediaBox</th>
-              <th>TrimBox (Ritaglio)</th>
-              <th>BleedBox (Abbondanza)</th>
-              <th>Rotazione</th>
-              <th>Immagini</th>
-              <th>Font</th>
-              <th>Tracciati Vettoriali</th>
-              <th>Parole</th>
+              <th>{t("th_page")}</th>
+              <th>{t("th_fmt_mb")}</th>
+              <th>{t("th_trim")}</th>
+              <th>{t("th_bleed")}</th>
+              <th>{t("th_rot")}</th>
+              <th>{t("th_imgs")}</th>
+              <th>{t("th_fnts")}</th>
+              <th>{t("th_vec_paths")}</th>
+              <th>{t("th_words")}</th>
             </tr>
           </thead>
           <tbody>
@@ -858,23 +853,19 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
 
     <!-- TAB: ATTACHMENTS -->
     <div id="tab-attachments" class="tab-pane">
-      {'<div class="table-container"><table><thead><tr><th>Nome File</th><th>Descrizione</th><th>Dimensione</th><th>Origine</th><th>Download</th></tr></thead><tbody>' + ''.join(attachments_rows_html) + '</tbody></table></div>' if attachments_rows_html else '<div class="empty-state">Nessun file o allegato incorporato nel PDF.</div>'}
+      {'<div class="table-container"><table><thead><tr><th>' + t("th_filename") + '</th><th>' + t("th_desc") + '</th><th>' + t("th_size") + '</th><th>' + t("th_source") + '</th><th>' + t("th_download") + '</th></tr></thead><tbody>' + ''.join(attachments_rows_html) + '</tbody></table></div>' if attachments_rows_html else f'<div class="empty-state">{t("empty_attachments")}</div>'}
     </div>
 
     <!-- TAB: XMP METADATA -->
     <div id="tab-xmp" class="tab-pane">
-      <h3 style="margin-bottom: 15px; font-size: 18px;">Pacchetto XML Metadati XMP (Adobe Extensible Metadata Platform)</h3>
-      {f'<pre class="code-block"><code>{xmp_content}</code></pre>' if xmp_content else '<div class="empty-state">Nessun flusso XMP presente nel PDF.</div>'}
+      <h3 style="margin-bottom: 15px; font-size: 18px;">{t("xmp_heading")}</h3>
+      {f'<pre class="code-block"><code>{xmp_content}</code></pre>' if xmp_content else f'<div class="empty-state">{t("empty_xmp")}</div>'}
     </div>
 
     <!-- DISCLAIMER FOOTER -->
     <footer style="margin-top: 50px; padding: 25px 20px; border-top: 1px solid var(--card-border); color: var(--text-muted); font-size: 12px; line-height: 1.6; text-align: center;">
-      <p style="font-weight: 600; color: #cbd5e1; margin-bottom: 5px;">⚖️ Note Legali & Utilizzo Responsabile</p>
-      <p style="max-width: 850px; margin: 0 auto;">
-        Questo strumento è concepito per analisi tecnica, verifica di pre-stampa, audit di accessibilità e recupero dei propri archivi documentali.
-        Le immagini, i font, la grafica vettoriale e i marchi estratti possono essere protetti da diritto d'autore, copyright o accordi di licenza commerciale (EULA).
-        L'utente è l'unico responsabile di verificare e rispettare le licenze e i diritti di utilizzo prima di riutilizzare o ridistribuire qualsiasi risorsa estratta.
-      </p>
+      <p style="font-weight: 600; color: #cbd5e1; margin-bottom: 5px;">⚖️ {t("legal_title")}</p>
+      <p style="max-width: 850px; margin: 0 auto;">{t("legal_body")}</p>
     </footer>
 
   </div>
@@ -883,15 +874,15 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
   <div id="imageModal" class="modal" onclick="closeModal()">
     <div class="modal-content" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <h4 id="modalTitle">Anteprima Immagine</h4>
+        <h4 id="modalTitle">{t("modal_preview")}</h4>
         <button class="modal-close" onclick="closeModal()">&times;</button>
       </div>
       <div class="modal-img-wrap">
-        <img id="modalImg" src="" alt="Anteprima">
+        <img id="modalImg" src="" alt="{t("modal_preview")}">
       </div>
       <div class="modal-footer">
         <div id="modalMeta"></div>
-        <a id="modalDownload" href="#" download class="btn-sm">Scarica Risoluzione Piena</a>
+        <a id="modalDownload" href="#" download class="btn-sm">{t("modal_dl")}</a>
       </div>
     </div>
   </div>
@@ -908,7 +899,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     function openModal(src, dims, fmt, sz, cs) {{
       document.getElementById('modalImg').src = src;
       document.getElementById('modalTitle').textContent = src.split('/').pop();
-      document.getElementById('modalMeta').innerHTML = '<strong>' + fmt + '</strong> &bull; ' + dims + ' &bull; ' + sz + ' &bull; Spazio: ' + cs;
+      document.getElementById('modalMeta').innerHTML = '<strong>' + fmt + '</strong> &bull; ' + dims + ' &bull; ' + sz + ' &bull; ' + cs;
       document.getElementById('modalDownload').href = src;
       document.getElementById('imageModal').style.display = 'flex';
     }}
@@ -931,7 +922,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path) -> Path:
     return report_file
 
 
-def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> Path:
+def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path, lang: str = "en") -> Path:
     """
     Renders a unified, offline-capable Batch Index Dashboard (`batch_report.html`,
     or `batch_report_2.html`, ... if already present) in `output_dir`, linking cleanly
@@ -951,9 +942,9 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     status_badge = (
-        f'<span class="badge badge-success">{succeeded}/{total_files} Completati</span>'
+        f'<span class="badge badge-success">{tr(lang, "batch_done_badge", s=succeeded, t=total_files)}</span>'
         if failed == 0
-        else f'<span class="badge badge-warning">{succeeded}/{total_files} OK · {failed} Errori</span>'
+        else f'<span class="badge badge-warning">{tr(lang, "batch_partial_badge", s=succeeded, t=total_files, f=failed)}</span>'
     )
 
     rows_html = []
@@ -970,11 +961,11 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
             has_individual_html = bool(item.get("html_report")) and Path(item["html_report"]).exists()
 
             report_link = (
-                f'<a href="{sub_href}/report.html" class="btn-primary-sm">Apri Report PDF &rarr;</a>'
+                f'<a href="{sub_href}/report.html" class="btn-primary-sm">{tr(lang, "btn_open_pdf_report")} &rarr;</a>'
                 if has_individual_html
-                else '<span class="text-muted">HTML disattivato</span>'
+                else f'<span class="text-muted">{tr(lang, "html_disabled_txt")}</span>'
             )
-            folder_link = f'<a href="{sub_href}/" class="btn-sm">Cartella</a>'
+            folder_link = f'<a href="{sub_href}/" class="btn-sm">{tr(lang, "btn_folder")}</a>'
 
             rows_html.append(f"""
             <tr class="batch-row" data-name="{fname.lower()}">
@@ -983,7 +974,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
                 <strong title="{src_full}">{fname}</strong>
                 <div class="text-muted font-code">&rarr; {html.escape(sub_name)}/</div>
               </td>
-              <td><span class="badge badge-success">OK</span></td>
+              <td><span class="badge badge-success">{tr(lang, "status_ok")}</span></td>
               <td>{s.get("total_pages", 0)}</td>
               <td>{s.get("total_images", 0)}</td>
               <td>{s.get("vector_pages_count", 0)}</td>
@@ -998,7 +989,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
             </tr>
             """)
         else:
-            err_msg = html.escape(item.get("error") or "Errore sconosciuto")
+            err_msg = html.escape(item.get("error") or tr(lang, "status_error"))
             rows_html.append(f"""
             <tr class="batch-row" data-name="{fname.lower()}">
               <td><span class="text-muted">{idx}</span></td>
@@ -1006,7 +997,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
                 <strong title="{src_full}">{fname}</strong>
                 <div style="color:#fca5a5; font-size:12px;">{err_msg}</div>
               </td>
-              <td><span class="badge badge-danger">Errore</span></td>
+              <td><span class="badge badge-danger">{tr(lang, "status_error")}</span></td>
               <td>-</td>
               <td>-</td>
               <td>-</td>
@@ -1017,11 +1008,11 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
             """)
 
     batch_html = f"""<!DOCTYPE html>
-<html lang="it">
+<html lang="{html.escape(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Batch Extraction Summary — PDF Asset Extractor</title>
+  <title>{tr(lang, "batch_html_title")}</title>
   <style>
     :root {{
       --bg: #0f172a;
@@ -1133,8 +1124,8 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
   <div class="container">
     <header>
       <div>
-        <h1>📚 Riepilogo Elaborazione Batch</h1>
-        <div class="sub">Cartella base: <span class="font-code">{html.escape(str(output_dir))}</span> &bull; {timestamp}</div>
+        <h1>&#x1F4DA; {tr(lang, "batch_html_heading")}</h1>
+        <div class="sub">{tr(lang, "batch_html_base")} <span class="font-code">{html.escape(str(output_dir))}</span> &bull; {timestamp}</div>
       </div>
       <div>{status_badge}</div>
     </header>
@@ -1142,37 +1133,37 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-val">{succeeded}/{total_files}</div>
-        <div class="kpi-label">PDF Elaborati</div>
+        <div class="kpi-label">{tr(lang, "batch_kpi_pdfs")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("total_pages", 0)}</div>
-        <div class="kpi-label">Pagine Totali</div>
+        <div class="kpi-label">{tr(lang, "kpi_pages")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("total_images", 0)}</div>
-        <div class="kpi-label">Immagini Estratte</div>
+        <div class="kpi-label">{tr(lang, "kpi_images")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("vector_pages_count", 0)}</div>
-        <div class="kpi-label">Pagine Vettoriali</div>
+        <div class="kpi-label">{tr(lang, "batch_kpi_vec_pages")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("embedded_fonts", 0)}/{agg.get("total_fonts", 0)}</div>
-        <div class="kpi-label">Font Incorporati</div>
+        <div class="kpi-label">{tr(lang, "batch_kpi_emb_fonts")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("color_profiles_count", 0)}</div>
-        <div class="kpi-label">Profili ICC</div>
+        <div class="kpi-label">{tr(lang, "kpi_profiles")}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-val">{agg.get("attachments_count", 0)}</div>
-        <div class="kpi-label">Allegati</div>
+        <div class="kpi-label">{tr(lang, "kpi_attachments")}</div>
       </div>
     </div>
 
     <div class="toolbar">
-      <h2 style="font-size: 17px; font-weight: 600;">Documenti elaborati</h2>
-      <input type="text" id="filterInput" class="search-input" placeholder="Filtra documenti per nome..." oninput="filterRows()" />
+      <h2 style="font-size: 17px; font-weight: 600;">{tr(lang, "batch_docs_heading")}</h2>
+      <input type="text" id="filterInput" class="search-input" placeholder="{html.escape(tr(lang, "batch_filter_ph"))}" oninput="filterRows()" />
     </div>
 
     <div class="table-container">
@@ -1180,14 +1171,14 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
         <thead>
           <tr>
             <th>#</th>
-            <th>Documento PDF &amp; Sottocartella</th>
-            <th>Stato</th>
-            <th>Pagine</th>
-            <th>Immagini</th>
-            <th>Vettoriali</th>
-            <th>Font (Incorp.)</th>
-            <th>Profili / Allegati</th>
-            <th>Azioni</th>
+            <th>{tr(lang, "th_doc_sub")}</th>
+            <th>{tr(lang, "th_status")}</th>
+            <th>{tr(lang, "th_pages")}</th>
+            <th>{tr(lang, "th_imgs")}</th>
+            <th>{tr(lang, "tab_vectors")}</th>
+            <th>{tr(lang, "th_fonts_emb")}</th>
+            <th>{tr(lang, "th_prof_att")}</th>
+            <th>{tr(lang, "th_actions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -1197,7 +1188,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path) -> 
     </div>
 
     <footer style="margin-top: 40px; padding: 20px; border-top: 1px solid var(--card-border); color: var(--text-muted); font-size: 12px; text-align: center;">
-      <p><strong>PDF Asset Extractor</strong> · by Linus74 &copy; 2026 &mdash; Uso responsabile: verifica i diritti d'autore e le licenze (EULA) delle risorse estratte.</p>
+      <p><strong>PDF Asset Extractor</strong> &middot; by Linus74 &copy; 2026 &mdash; {tr(lang, "legal_body")}</p>
     </footer>
   </div>
 

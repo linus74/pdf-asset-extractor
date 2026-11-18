@@ -115,7 +115,7 @@ def test_full_extraction(tmp_path):
     base_dir = tmp_path / "extracted_assets"
     result = extract_pdf_assets(pdf_path, output_dir=base_dir)
     out_dir = Path(result["output_directory"])
-    assert out_dir == base_dir / "test_doc_estratto"
+    assert out_dir == base_dir / "test_doc_extracted"
 
     # Assert summary
     assert result["summary"]["total_pages"] == 2
@@ -189,7 +189,7 @@ def test_preflight_and_progress_callback(tmp_path):
         progress_callback=lambda msg, pct: events.append((msg, pct))
     )
     out_dir = Path(res["output_directory"])
-    assert out_dir == base_dir / "preflight_doc_estratto"
+    assert out_dir == base_dir / "preflight_doc_extracted"
     assert len(events) >= 5
     assert events[-1][1] == 1.0
     assert not (out_dir / "report.html").exists()
@@ -205,9 +205,9 @@ def test_unique_parent_folder_increment(tmp_path):
     r2 = extract_pdf_assets(pdf_path, output_dir=base_dir, generate_html=False)
     r3 = extract_pdf_assets(pdf_path, output_dir=base_dir, generate_html=False)
 
-    assert Path(r1["output_directory"]) == base_dir / "catalog_estratto"
-    assert Path(r2["output_directory"]) == base_dir / "catalog_estratto_2"
-    assert Path(r3["output_directory"]) == base_dir / "catalog_estratto_3"
+    assert Path(r1["output_directory"]) == base_dir / "catalog_extracted"
+    assert Path(r2["output_directory"]) == base_dir / "catalog_extracted_2"
+    assert Path(r3["output_directory"]) == base_dir / "catalog_extracted_3"
     assert (Path(r1["output_directory"]) / "report.json").exists()
     assert (Path(r2["output_directory"]) / "report.json").exists()
     assert (Path(r3["output_directory"]) / "report.json").exists()
@@ -240,8 +240,8 @@ def test_batch_extraction(tmp_path):
     assert batch_res["total_files"] == 3
     assert batch_res["succeeded"] == 2
     assert batch_res["failed"] == 1
-    assert (out_base / "alpha_estratto" / "report.json").exists()
-    assert (out_base / "beta_estratto" / "report.json").exists()
+    assert (out_base / "alpha_extracted" / "report.json").exists()
+    assert (out_base / "beta_extracted" / "report.json").exists()
     assert ("corrupt.pdf", "error") in statuses
     assert ("alpha.pdf", "success") in statuses
 
@@ -262,7 +262,36 @@ def test_batch_html_report_and_non_overwrite(tmp_path):
     assert r2.exists() and r2.name == "batch_report_2.html"
 
     html_txt = r1.read_text(encoding="utf-8")
-    assert "one_estratto/report.html" in html_txt
-    assert "two_estratto/report.html" in html_txt
+    assert "one_extracted/report.html" in html_txt
+    assert "two_extracted/report.html" in html_txt
+    assert '<html lang="en">' in html_txt
+    assert "Batch Extraction Summary" in html_txt
     assert "one.pdf" in html_txt
     assert "two.pdf" in html_txt
+
+
+def test_i18n_translations_and_locale_folders(tmp_path):
+    from pdf_extractor.utils.i18n import tr, TRANSLATIONS
+
+    assert set(TRANSLATIONS["en"].keys()) == set(TRANSLATIONS["it"].keys())
+    assert tr("en", "btn_extract") == "Extract Assets"
+    assert tr("it", "btn_extract") == "Estrai Risorse"
+
+    pdf_path = tmp_path / "doc_it.pdf"
+    create_comprehensive_test_pdf(pdf_path)
+
+    base_it = tmp_path / "out_it"
+    res_it = extract_pdf_assets(pdf_path, output_dir=base_it, generate_html=True, lang="it")
+    out_it = Path(res_it["output_directory"])
+    assert out_it == base_it / "doc_it_estratto"
+    html_it = Path(res_it["html_report"]).read_text(encoding="utf-8")
+    assert '<html lang="it">' in html_it
+    assert "Report Completo di Estrazione Risorse e Metadati" in html_it
+
+    base_en = tmp_path / "out_en"
+    res_en = extract_pdf_assets(pdf_path, output_dir=base_en, generate_html=True, lang="en")
+    out_en = Path(res_en["output_directory"])
+    assert out_en == base_en / "doc_it_extracted"
+    html_en = Path(res_en["html_report"]).read_text(encoding="utf-8")
+    assert '<html lang="en">' in html_en
+    assert "Complete Asset Extraction &amp; Forensics Report" in html_en or "Complete Asset Extraction & Forensics Report" in html_en

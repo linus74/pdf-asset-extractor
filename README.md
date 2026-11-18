@@ -38,11 +38,11 @@ Inside a single `.pdf` file, the original building blocks of the document often 
 ## ✨ Key Features
 
 ### 🖥️ Modern Desktop App (`PDF-Extractor.exe`)
-- **Horizontal Split-View UI** with **Dark & Light theme** toggle.
+- **Horizontal Split-View UI** with **Dark & Light theme** toggle and **live `EN` / `IT` language switcher** (auto-detects OS language on first run and saves preferences).
 - **Instant Pre-Flight Preview**: Drag & drop a PDF to immediately inspect a rendered Page 1 thumbnail, paper format, page count, file size, authoring software, and inline password prompt if encrypted.
 - **Single-File & Batch Queue**: Drop multiple PDFs or an entire folder to process them sequentially into isolated subfolders, with per-file live status and error isolation.
-- **1-Click Extraction Profiles**: `Completo` · `Solo Grafica` · `Solo Font` · `Solo Analisi`, plus fine-grained toggles.
-- **Optional HTML Dashboard**: Choose whether to generate `report.html` and whether to auto-open it in your browser.
+- **1-Click Extraction Profiles**: `Full` · `Graphics` · `Fonts` · `Audit Only` (`Completo` · `Solo Grafica` · `Solo Font` · `Solo Analisi` in IT), plus fine-grained toggles.
+- **Optional HTML Dashboard**: Choose whether to generate `report.html` / `batch_report.html` and whether to auto-open it in your browser.
 - **Zero-Console Windows Binary**: Compiles into a standalone `.exe` with a custom icon — no Python installation required for end users.
 
 ### 📦 What Gets Extracted
@@ -95,11 +95,11 @@ PDFs embed fonts in two ways, which this tool transparently distinguishes:
 
 ## 📁 Safe Output Structure (Anti-Overwrite)
 
-To ensure existing files are never overwritten (even if you pick your Desktop as destination), every processed PDF gets its own dedicated folder named `<document_name>_estratto/` inside the chosen base directory (default `./output/`). Subsequent runs on the same file automatically append `_2`, `_3`, etc.:
+To ensure existing files are never overwritten (even if you pick your Desktop as destination), every processed PDF gets its own dedicated folder named `<document_name>_extracted/` (or `<document_name>_estratto/` in Italian) inside the chosen base directory (default `./output/`). Subsequent runs on the same file automatically append `_2`, `_3`, etc.:
 
 ```text
 output/  (or any base folder you select)
-└── sample_document_estratto/          # Automatically becomes _2, _3 if it exists
+└── sample_document_extracted/         # Automatically becomes _2, _3 if it exists
     ├── report.html                    # Interactive offline dashboard
     ├── report.json                    # Full machine-readable report
     ├── images/                        # Deduplicated images + RGBA alpha PNGs
@@ -131,8 +131,11 @@ uv sync
 # Launch Desktop GUI
 uv run pdf-extract --gui
 
-# Extract a single PDF (outputs to ./output/<name>_estratto/)
+# Extract a single PDF (outputs to ./output/<name>_extracted/ or _estratto/)
 uv run pdf-extract path/to/document.pdf
+
+# Specify output language explicitly (en or it)
+uv run pdf-extract path/to/document.pdf --lang en
 
 # Batch extract multiple PDFs or an entire folder into a custom directory
 uv run pdf-extract file1.pdf file2.pdf -o ./batch_output

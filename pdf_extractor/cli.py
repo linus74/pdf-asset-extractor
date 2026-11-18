@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .core import extract_pdf_assets, extract_batch_pdfs, collect_pdf_paths
+from .utils.i18n import get_default_language, SUPPORTED_LANGS
 
 if sys.platform == "win32":
     try:
@@ -32,18 +33,24 @@ console = Console(legacy_windows=False)
     "-o", "--output", "output_dir",
     type=click.Path(file_okay=False, path_type=Path),
     default=None,
-    help="Cartella base di destinazione in cui creare '<nome_pdf>_estratto' (predefinito: ./output)"
+    help="Base destination folder for '<pdf_name>_extracted' (or '_estratto' in IT) (default: ./output)"
 )
-@click.option("--gui", is_flag=True, help="Avvia l'interfaccia grafica desktop")
-@click.option("--no-images", is_flag=True, help="Disabilita estrazione delle immagini")
-@click.option("--no-fonts", is_flag=True, help="Disabilita estrazione dei font")
-@click.option("--no-vectors", is_flag=True, help="Disabilita estrazione grafica vettoriale (.svg e .ai)")
-@click.option("--no-profiles", is_flag=True, help="Disabilita estrazione dei profili colore ICC")
-@click.option("--no-attachments", is_flag=True, help="Disabilita estrazione degli allegati")
-@click.option("--no-html", is_flag=True, help="Non generare il report interattivo HTML")
-@click.option("--open", "open_report", is_flag=True, help="Apri automaticamente il report HTML nel browser al termine")
-@click.option("-p", "--password", default=None, help="Password per PDF protetti o crittografati")
-@click.option("-q", "--quiet", is_flag=True, help="Modalità silenziosa (nessun output console tranne errori)")
+@click.option("--gui", is_flag=True, help="Launch the Desktop GUI")
+@click.option("--no-images", is_flag=True, help="Disable image extraction")
+@click.option("--no-fonts", is_flag=True, help="Disable font extraction")
+@click.option("--no-vectors", is_flag=True, help="Disable vector graphics extraction (.svg and .ai)")
+@click.option("--no-profiles", is_flag=True, help="Disable ICC color profile extraction")
+@click.option("--no-attachments", is_flag=True, help="Disable embedded attachment extraction")
+@click.option("--no-html", is_flag=True, help="Do not generate interactive HTML report")
+@click.option("--open", "open_report", is_flag=True, help="Automatically open the HTML report in browser when done")
+@click.option("-p", "--password", default=None, help="Password for encrypted PDFs")
+@click.option(
+    "--lang",
+    type=click.Choice(list(SUPPORTED_LANGS), case_sensitive=False),
+    default=None,
+    help="Output language for reports and folder names ('en' or 'it'). Auto-detected by default."
+)
+@click.option("-q", "--quiet", is_flag=True, help="Quiet mode (no console output except errors)")
 def main(
     pdf_paths: tuple[Path, ...],
     output_dir: Path | None,
@@ -56,32 +63,38 @@ def main(
     no_html: bool,
     open_report: bool,
     password: str | None,
+    lang: str | None,
     quiet: bool,
 ):
     """
-    Estrae immagini, grafica vettoriale (.SVG/.AI), font (completi e sottinsiemi),
-    profili colore ICC, colori speciali, dimensioni di pagina e metadati da uno o più PDF.
+    Extract images, vector graphics (.SVG/.AI), fonts (full & subsets),
+    ICC color profiles, spot colors, page geometry, and metadata from one or more PDFs.
 
-    Se eseguito senza argomenti (o con --gui), avvia l'interfaccia Desktop.
+    Run without arguments (or with --gui) to launch the Desktop GUI.
     """
     if gui or not pdf_paths:
         from .gui import launch_gui
         launch_gui()
         return
 
+    resolved_lang = lang.lower() if lang else get_default_language()
+    is_it = resolved_lang == "it"
+
     resolved_pdfs = collect_pdf_paths(list(pdf_paths))
     if not resolved_pdfs:
-        console.print("[bold red]Errore:[/bold red] Nessun file .pdf trovato nei percorsi specificati.")
+        msg = "Nessun file .pdf trovato nei percorsi specificati." if is_it else "No .pdf files found in the specified paths."
+        console.print(f"[bold red]{'Errore' if is_it else 'Error'}:[/bold red] {msg}")
         sys.exit(1)
 
     # Single PDF mode
     if len(resolved_pdfs) == 1:
         pdf_path = resolved_pdfs[0]
         if not quiet:
+            proc_lbl = "File in elaborazione" if is_it else "Processing file"
             console.print(
                 Panel.fit(
                     "[bold cyan]PDF Asset & Metadata Deep Extractor[/bold cyan] [dim]by Linus74 · 2026[/dim]\n"
-                    f"[dim]File in elaborazione: [white]{pdf_path.name}[/white][/dim]",
+                    f"[dim]{proc_lbl}: [white]{pdf_path.name}[/white][/dim]",
                     border_style="cyan"
                 )
             )
@@ -94,7 +107,8 @@ def main(
                     console=console,
                     transient=True
                 ) as progress:
-                    progress.add_task("[yellow]Estrazione in corso da PDF...", total=None)
+                    spin_lbl = "Estrazione in corso da PDF..." if is_it else "Extracting PDF assets..."
+                    progress.add_task(f"[yellow]{spin_lbl}", total=None)
                     result = extract_pdf_assets(
                         pdf_path=pdf_path,
                         output_dir=output_dir,
@@ -105,6 +119,7 @@ def main(
                         extract_vecs=not no_vectors,
                         generate_html=not no_html,
                         password=password,
+                        lang=resolved_lang,
                     )
             else:
                 result = extract_pdf_assets(
@@ -117,13 +132,15 @@ def main(
                     extract_vecs=not no_vectors,
                     generate_html=not no_html,
                     password=password,
+                    lang=resolved_lang,
                 )
         except Exception as e:
-            console.print(f"[bold red]Errore durante l'elaborazione del PDF:[/bold red] {e}")
+            err_lbl = "Errore durante l'elaborazione del PDF" if is_it else "Error processing PDF"
+            console.print(f"[bold red]{err_lbl}:[/bold red] {e}")
             sys.exit(1)
 
         if not quiet:
-            _print_single_summary(result)
+            _print_single_summary(result, lang=resolved_lang)
 
         if open_report and result.get("html_report"):
             webbrowser.open(Path(result["html_report"]).as_uri())
@@ -131,10 +148,12 @@ def main(
 
     # Batch Multi-PDF mode
     if not quiet:
+        mode_lbl = "Modalità Batch" if is_it else "Batch Mode"
+        queue_lbl = "File in coda" if is_it else "Queued files"
         console.print(
             Panel.fit(
-                "[bold cyan]PDF Asset & Metadata Deep Extractor — Modalità Batch[/bold cyan] [dim]by Linus74 · 2026[/dim]\n"
-                f"[dim]File in coda: [white]{len(resolved_pdfs)} PDF[/white][/dim]",
+                f"[bold cyan]PDF Asset & Metadata Deep Extractor — {mode_lbl}[/bold cyan] [dim]by Linus74 · 2026[/dim]\n"
+                f"[dim]{queue_lbl}: [white]{len(resolved_pdfs)} PDF[/white][/dim]",
                 border_style="cyan"
             )
         )
@@ -146,7 +165,8 @@ def main(
             console=console,
             transient=True
         ) as progress:
-            task = progress.add_task(f"[yellow]Elaborazione batch di {len(resolved_pdfs)} PDF...", total=None)
+            b_lbl = f"Elaborazione batch di {len(resolved_pdfs)} PDF..." if is_it else f"Batch processing {len(resolved_pdfs)} PDFs..."
+            task = progress.add_task(f"[yellow]{b_lbl}", total=None)
             batch_res = extract_batch_pdfs(
                 pdf_paths=resolved_pdfs,
                 output_dir=output_dir,
@@ -158,6 +178,7 @@ def main(
                 generate_html=not no_html,
                 password=password,
                 progress_callback=lambda msg, pct: progress.update(task, description=f"[yellow]{msg}"),
+                lang=resolved_lang,
             )
     else:
         batch_res = extract_batch_pdfs(
@@ -170,10 +191,11 @@ def main(
             extract_vecs=not no_vectors,
             generate_html=not no_html,
             password=password,
+            lang=resolved_lang,
         )
 
     if not quiet:
-        _print_batch_summary(batch_res)
+        _print_batch_summary(batch_res, lang=resolved_lang)
 
     if open_report and batch_res.get("html_report"):
         webbrowser.open(Path(batch_res["html_report"]).as_uri())
@@ -182,67 +204,96 @@ def main(
         sys.exit(1)
 
 
-def _print_single_summary(result: dict):
+def _print_single_summary(result: dict, lang: str = "en"):
+    is_it = lang == "it"
     summary = result["summary"]
     meta = result["metadata"]
     color = result["color_management"]
     pages = result["pages"]
 
-    tbl = Table(title="Riepilogo Estrazione Risorse", show_header=True, header_style="bold magenta")
-    tbl.add_column("Proprietà", style="dim", width=28)
-    tbl.add_column("Valore Rilevato", style="white")
+    tbl = Table(
+        title="Riepilogo Estrazione Risorse" if is_it else "Asset Extraction Summary",
+        show_header=True,
+        header_style="bold magenta",
+    )
+    tbl.add_column("Proprietà" if is_it else "Property", style="dim", width=28)
+    tbl.add_column("Valore Rilevato" if is_it else "Detected Value", style="white")
 
-    tbl.add_row("Nome File", summary["file_name"])
-    tbl.add_row("Dimensione File", summary["file_size"])
-    tbl.add_row("Pagine Totali", str(summary["total_pages"]))
+    tbl.add_row("Nome File" if is_it else "File Name", summary["file_name"])
+    tbl.add_row("Dimensione File" if is_it else "File Size", summary["file_size"])
+    tbl.add_row("Pagine Totali" if is_it else "Total Pages", str(summary["total_pages"]))
 
     formats_seen = set()
     for p in pages:
         mb = p.get("mediabox")
         if mb and mb.get("matched_size"):
             formats_seen.add(f"{mb['matched_size']} ({mb.get('orientation', '')})")
-    tbl.add_row("Dimensioni Pagine", ", ".join(formats_seen) if formats_seen else "N/D")
+    nd = "N/D" if is_it else "N/A"
+    unspec = "[dim]Non specificato[/dim]" if is_it else "[dim]Not specified[/dim]"
+    tbl.add_row("Dimensioni Pagine" if is_it else "Page Dimensions", ", ".join(formats_seen) if formats_seen else nd)
 
-    tbl.add_row("Versione PDF", meta.get("pdf_version", "N/D"))
-    tbl.add_row("Software Creazione (Creator)", meta.get("creator") or "[dim]Non specificato[/dim]")
-    tbl.add_row("Motore Generazione (Producer)", meta.get("producer") or "[dim]Non specificato[/dim]")
+    tbl.add_row("Versione PDF" if is_it else "PDF Version", meta.get("pdf_version", nd))
+    tbl.add_row("Software Creazione (Creator)" if is_it else "Authoring Software (Creator)", meta.get("creator") or unspec)
+    tbl.add_row("Motore Generazione (Producer)" if is_it else "PDF Engine (Producer)", meta.get("producer") or unspec)
 
     stds = meta.get("standards", {})
     std_list = [v for k, v in stds.items() if v]
     if std_list:
-        tbl.add_row("Standard di Conformità", ", ".join(std_list))
+        tbl.add_row("Standard di Conformità" if is_it else "Compliance Standards", ", ".join(std_list))
 
-    tbl.add_row("Immagini Estratte", f"[bold green]{summary['total_images']}[/bold green] uniche")
-    tbl.add_row("Grafica Vettoriale", f"[bold green]{summary.get('vector_pages_count', 0)}[/bold green] pagine ({summary.get('vector_paths_count', 0)} tracciati, .svg e .ai)")
-    tbl.add_row("Font Recuperati", f"[bold green]{summary['total_fonts']}[/bold green] (Incorporati: {summary['embedded_fonts']}, Sottinsiemi: {summary['subset_fonts']})")
-    tbl.add_row("Profili ICC", f"{summary['color_profiles_count']} estratti")
-    if color.get("spot_colors"):
-        tbl.add_row("Colori Speciali (Spot)", ", ".join(color["spot_colors"]))
-    tbl.add_row("Allegati Incorporati", f"{summary['attachments_count']} file")
+    if is_it:
+        tbl.add_row("Immagini Estratte", f"[bold green]{summary['total_images']}[/bold green] uniche")
+        tbl.add_row("Grafica Vettoriale", f"[bold green]{summary.get('vector_pages_count', 0)}[/bold green] pagine ({summary.get('vector_paths_count', 0)} tracciati, .svg e .ai)")
+        tbl.add_row("Font Recuperati", f"[bold green]{summary['total_fonts']}[/bold green] (Incorporati: {summary['embedded_fonts']}, Sottinsiemi: {summary['subset_fonts']})")
+        tbl.add_row("Profili ICC", f"{summary['color_profiles_count']} estratti")
+        if color.get("spot_colors"):
+            tbl.add_row("Colori Speciali (Spot)", ", ".join(color["spot_colors"]))
+        tbl.add_row("Allegati Incorporati", f"{summary['attachments_count']} file")
+    else:
+        tbl.add_row("Extracted Images", f"[bold green]{summary['total_images']}[/bold green] unique")
+        tbl.add_row("Vector Graphics", f"[bold green]{summary.get('vector_pages_count', 0)}[/bold green] pages ({summary.get('vector_paths_count', 0)} paths, .svg and .ai)")
+        tbl.add_row("Recovered Fonts", f"[bold green]{summary['total_fonts']}[/bold green] (Embedded: {summary['embedded_fonts']}, Subsets: {summary['subset_fonts']})")
+        tbl.add_row("ICC Profiles", f"{summary['color_profiles_count']} extracted")
+        if color.get("spot_colors"):
+            tbl.add_row("Spot Colors", ", ".join(color["spot_colors"]))
+        tbl.add_row("Embedded Attachments", f"{summary['attachments_count']} files")
 
     console.print(tbl)
 
-    out_panel = (
-        f"[bold green]✓ Estrazione completata con successo![/bold green]\n\n"
-        f"📁 [bold]Cartella output:[/bold] [cyan]{result['output_directory']}[/cyan]\n"
-        f"📊 [bold]Report JSON:[/bold] [cyan]{result.get('json_report')}[/cyan]\n"
-    )
-    if result.get("html_report"):
-        out_panel += f"🌐 [bold]Report HTML Interattivo:[/bold] [cyan]{result.get('html_report')}[/cyan]\n"
+    if is_it:
+        out_panel = (
+            f"[bold green]✓ Estrazione completata con successo![/bold green]\n\n"
+            f"📁 [bold]Cartella output:[/bold] [cyan]{result['output_directory']}[/cyan]\n"
+            f"📊 [bold]Report JSON:[/bold] [cyan]{result.get('json_report')}[/cyan]\n"
+        )
+        if result.get("html_report"):
+            out_panel += f"🌐 [bold]Report HTML Interattivo:[/bold] [cyan]{result.get('html_report')}[/cyan]\n"
+        legal_note = "Nota: Assicurati di disporre dei diritti di utilizzo per le immagini, i font e le risorse estratte conformemente alle licenze e alle norme sul diritto d'autore."
+    else:
+        out_panel = (
+            f"[bold green]✓ Extraction complete![/bold green]\n\n"
+            f"📁 [bold]Output folder:[/bold] [cyan]{result['output_directory']}[/cyan]\n"
+            f"📊 [bold]JSON Report:[/bold] [cyan]{result.get('json_report')}[/cyan]\n"
+        )
+        if result.get("html_report"):
+            out_panel += f"🌐 [bold]Interactive HTML Report:[/bold] [cyan]{result.get('html_report')}[/cyan]\n"
+        legal_note = "Note: Ensure you have the rights and licenses (EULA) before reusing extracted images, fonts, or assets."
 
     console.print(Panel(out_panel, border_style="green"))
-    console.print(
-        "[dim]⚖️  [italic]Nota: Assicurati di disporre dei diritti di utilizzo per le immagini, i font e le risorse estratte "
-        "conformemente alle licenze e alle norme sul diritto d'autore.[/italic][/dim]\n"
+    console.print(f"[dim]⚖️  [italic]{legal_note}[/italic][/dim]\n")
+
+
+def _print_batch_summary(batch_res: dict, lang: str = "en"):
+    is_it = lang == "it"
+    tbl = Table(
+        title="Riepilogo Batch Multi-PDF" if is_it else "Multi-PDF Batch Summary",
+        show_header=True,
+        header_style="bold magenta",
     )
-
-
-def _print_batch_summary(batch_res: dict):
-    tbl = Table(title="Riepilogo Batch Multi-PDF", show_header=True, header_style="bold magenta")
-    tbl.add_column("File PDF", style="white")
-    tbl.add_column("Stato", style="bold")
-    tbl.add_column("Img / Vet / Font", style="cyan")
-    tbl.add_column("Sottocartella Creata", style="dim")
+    tbl.add_column("File PDF" if is_it else "PDF File", style="white")
+    tbl.add_column("Stato" if is_it else "Status", style="bold")
+    tbl.add_column("Img / Vet / Font" if is_it else "Img / Vec / Font", style="cyan")
+    tbl.add_column("Sottocartella Creata" if is_it else "Created Subfolder", style="dim")
 
     for item in batch_res["items"]:
         if item["status"] == "success":
@@ -251,15 +302,24 @@ def _print_batch_summary(batch_res: dict):
             folder_name = Path(item["output_directory"]).name
             tbl.add_row(item["file_name"], "[green]OK[/green]", counts, folder_name)
         else:
-            tbl.add_row(item["file_name"], "[red]Errore[/red]", "-", item.get("error") or "")
+            err_lbl = "Errore" if is_it else "Error"
+            tbl.add_row(item["file_name"], f"[red]{err_lbl}[/red]", "-", item.get("error") or "")
 
     console.print(tbl)
-    batch_panel = (
-        f"[bold green]✓ Batch completato: {batch_res['succeeded']}/{batch_res['total_files']} PDF elaborati.[/bold green]\n"
-        f"📁 [bold]Cartella base output:[/bold] [cyan]{batch_res['output_directory']}[/cyan]"
-    )
-    if batch_res.get("html_report"):
-        batch_panel += f"\n🌐 [bold]Report Batch HTML:[/bold] [cyan]{batch_res['html_report']}[/cyan]"
+    if is_it:
+        batch_panel = (
+            f"[bold green]✓ Batch completato: {batch_res['succeeded']}/{batch_res['total_files']} PDF elaborati.[/bold green]\n"
+            f"📁 [bold]Cartella base output:[/bold] [cyan]{batch_res['output_directory']}[/cyan]"
+        )
+        if batch_res.get("html_report"):
+            batch_panel += f"\n🌐 [bold]Report Batch HTML:[/bold] [cyan]{batch_res['html_report']}[/cyan]"
+    else:
+        batch_panel = (
+            f"[bold green]✓ Batch complete: {batch_res['succeeded']}/{batch_res['total_files']} PDFs processed.[/bold green]\n"
+            f"📁 [bold]Base output folder:[/bold] [cyan]{batch_res['output_directory']}[/cyan]"
+        )
+        if batch_res.get("html_report"):
+            batch_panel += f"\n🌐 [bold]Batch HTML Report:[/bold] [cyan]{batch_res['html_report']}[/cyan]"
     console.print(Panel(batch_panel, border_style="green"))
 
 
