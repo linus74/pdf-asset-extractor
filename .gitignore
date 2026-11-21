@@ -44,6 +44,8 @@ htmlcov/
 .gemini/
 .claude/
 .cursor/
+AGENTS.md
+docs/ai/
 *.swp
 *.swo
 *~
