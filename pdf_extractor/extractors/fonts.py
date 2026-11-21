@@ -171,14 +171,17 @@ def _repair_and_inspect_font(
 
 def extract_fonts(
     doc: pymupdf.Document,
-    output_dir: Path
+    output_dir: Optional[Path] = None
 ) -> List[Dict[str, Any]]:
     """
     Extracts all embedded fonts and inventories all fonts across document pages.
     Saves recovered font files to `output_dir / "fonts"` with repair validation.
+    When `output_dir` is None, inspects embedding and subset metadata in memory without disk writes.
     """
-    fonts_dir = output_dir / "fonts"
-    fonts_dir.mkdir(parents=True, exist_ok=True)
+    write_files = output_dir is not None
+    fonts_dir = (output_dir / "fonts") if write_files else None
+    if fonts_dir is not None:
+        fonts_dir.mkdir(parents=True, exist_ok=True)
 
     # Key: font xref (or unique basefont name if xref <= 0)
     fonts_map: Dict[Any, Dict[str, Any]] = {}
@@ -252,39 +255,45 @@ def extract_fonts(
 
         if buffer and len(buffer) > 0:
             f_info["is_embedded"] = True
-
-            # Repair and inspect with fonttools
-            buffer, repair_info = _repair_and_inspect_font(
-                buffer=buffer,
-                clean_family_name=f_info["clean_name"],
-                basefont=f_info["basefont"],
-                declared_subset=f_info["is_subset"]
-            )
-
-            f_info.update(repair_info)
-
             file_size = len(buffer)
             f_info["file_size_bytes"] = file_size
             f_info["file_size"] = format_bytes(file_size)
-            f_hash = compute_sha256(buffer)
-            f_info["sha256"] = f_hash
 
-            clean_ext = ext.lower().replace("n/a", "bin")
-            if clean_ext not in ["ttf", "otf", "cff", "woff", "pfb", "pfa"]:
-                clean_ext = "otf" if "cff" in ftype.lower() or "type1" in ftype.lower() else "ttf"
+            if write_files:
+                # Repair and inspect with fonttools
+                buffer, repair_info = _repair_and_inspect_font(
+                    buffer=buffer,
+                    clean_family_name=f_info["clean_name"],
+                    basefont=f_info["basefont"],
+                    declared_subset=f_info["is_subset"]
+                )
 
-            safe_name = sanitize_filename(f_info["basefont"])
-            font_filename = f"{font_index:02d}_{safe_name}.{clean_ext}"
-            font_path = fonts_dir / font_filename
+                f_info.update(repair_info)
 
-            try:
-                with open(font_path, "wb") as f:
-                    f.write(buffer)
-                f_info["saved_file"] = f"fonts/{font_filename}"
-            except Exception:
-                pass
+                file_size = len(buffer)
+                f_info["file_size_bytes"] = file_size
+                f_info["file_size"] = format_bytes(file_size)
+                f_hash = compute_sha256(buffer)
+                f_info["sha256"] = f_hash
 
-            font_index += 1
+                clean_ext = ext.lower().replace("n/a", "bin")
+                if clean_ext not in ["ttf", "otf", "cff", "woff", "pfb", "pfa"]:
+                    clean_ext = "otf" if "cff" in ftype.lower() or "type1" in ftype.lower() else "ttf"
+
+                safe_name = sanitize_filename(f_info["basefont"])
+                font_filename = f"{font_index:02d}_{safe_name}.{clean_ext}"
+                font_path = fonts_dir / font_filename
+
+                try:
+                    with open(font_path, "wb") as f:
+                        f.write(buffer)
+                    f_info["saved_file"] = f"fonts/{font_filename}"
+                except Exception:
+                    pass
+
+                font_index += 1
+            else:
+                f_info["install_status"] = "subset" if f_info["is_subset"] else "full"
 
         # Extract flags from FontDescriptor if available in PDF
         try:

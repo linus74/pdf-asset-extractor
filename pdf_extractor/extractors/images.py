@@ -4,27 +4,30 @@ with /SMask, deduplicates shared images, calculates effective DPI, and exports m
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Set, Tuple
+from typing import List, Dict, Any, Optional
 import pymupdf
 from ..utils.helpers import compute_sha256, format_bytes, sanitize_filename
 
 
 def extract_images(
     doc: pymupdf.Document,
-    output_dir: Path
+    output_dir: Optional[Path] = None
 ) -> List[Dict[str, Any]]:
     """
     Extracts all images from doc, saving unique image files into `output_dir / "images"`.
-    Returns list of metadata dicts for each unique image.
+    When `output_dir` is None, runs a zero-disk-write inspection collecting metadata,
+    placements, colorspaces, and effective DPI in memory.
     """
-    images_dir = output_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
+    write_files = output_dir is not None
+    images_dir = (output_dir / "images") if write_files else None
+    if images_dir is not None:
+        images_dir.mkdir(parents=True, exist_ok=True)
 
     extracted_images: List[Dict[str, Any]] = []
     # Map hash -> index in extracted_images
     hash_to_index: Dict[str, int] = {}
-    # Map xref -> hash
-    xref_to_hash: Dict[int, str] = {}
+    # Map xref -> hash (or index key when running in-memory)
+    xref_to_key: Dict[int, str] = {}
 
     img_counter = 1
 
@@ -39,7 +42,6 @@ def extract_images(
             height = img_tuple[3]
             bpc = img_tuple[4]
             colorspace = img_tuple[5]
-            img_name = img_tuple[7]
 
             # Calculate placement rects on this page and effective DPI
             placements = []
@@ -63,9 +65,9 @@ def extract_images(
                 pass
 
             # If already processed this xref
-            if xref in xref_to_hash:
-                img_hash = xref_to_hash[xref]
-                idx = hash_to_index[img_hash]
+            if xref in xref_to_key:
+                img_key = xref_to_key[xref]
+                idx = hash_to_index[img_key]
                 existing = extracted_images[idx]
                 if pno not in existing["pages"]:
                     existing["pages"].append(pno)
@@ -73,82 +75,102 @@ def extract_images(
                     existing["placements"].extend(placements)
                 continue
 
-            # Extract the image data
             has_transparency = bool(smask > 0)
             image_bytes = b""
             ext = "png"
 
-            # Case A: Image has Soft Mask (SMask) transparency
-            if has_transparency:
-                try:
-                    base_pix = pymupdf.Pixmap(doc, xref)
-                    # If base pixmap is CMYK or other space not RGB, convert to RGB first
-                    if base_pix.n >= 5 or base_pix.colorspace != pymupdf.csRGB:
-                        rgb_pix = pymupdf.Pixmap(pymupdf.csRGB, base_pix)
-                        base_pix = rgb_pix
-
-                    mask_pix = pymupdf.Pixmap(doc, smask)
-                    # Combine base pixmap with alpha mask
-                    combined_pix = pymupdf.Pixmap(base_pix, mask_pix)
-                    image_bytes = combined_pix.tobytes("png")
-                    ext = "png"
-                except Exception:
-                    # Fallback to standard extraction
-                    raw_dict = doc.extract_image(xref)
-                    image_bytes = raw_dict.get("image", b"")
-                    ext = raw_dict.get("ext", "png")
-            else:
-                # Case B: Standard image without mask
+            if not write_files:
+                # Lightweight in-memory inspection: refine colorspace/dimensions without decoding pixels or writing disk
                 try:
                     raw_dict = doc.extract_image(xref)
-                    image_bytes = raw_dict.get("image", b"")
-                    ext = raw_dict.get("ext", "png")
-                    width = raw_dict.get("width", width)
-                    height = raw_dict.get("height", height)
-                    colorspace = raw_dict.get("colorspace", colorspace)
-                    bpc = raw_dict.get("bpc", bpc)
+                    if raw_dict:
+                        ext = raw_dict.get("ext", "png")
+                        width = raw_dict.get("width", width)
+                        height = raw_dict.get("height", height)
+                        colorspace = raw_dict.get("colorspace", colorspace)
+                        bpc = raw_dict.get("bpc", bpc)
                 except Exception:
                     pass
-
-                # If raw extraction was empty or failed, fallback to Pixmap
-                if not image_bytes:
+                img_hash = f"xref:{xref}"
+                xref_to_key[xref] = img_hash
+                clean_ext = ext.lower().replace("jpeg", "jpg")
+                filename = f"image_{img_counter:03d}_xref{xref}.{clean_ext}"
+                file_path_str = None
+                file_size = 0
+            else:
+                # Case A: Image has Soft Mask (SMask) transparency
+                if has_transparency:
                     try:
-                        pix = pymupdf.Pixmap(doc, xref)
-                        if pix.n >= 5:
-                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
-                        image_bytes = pix.tobytes("png")
+                        base_pix = pymupdf.Pixmap(doc, xref)
+                        # If base pixmap is CMYK or other space not RGB, convert to RGB first
+                        if base_pix.n >= 5 or base_pix.colorspace != pymupdf.csRGB:
+                            rgb_pix = pymupdf.Pixmap(pymupdf.csRGB, base_pix)
+                            base_pix = rgb_pix
+
+                        mask_pix = pymupdf.Pixmap(doc, smask)
+                        # Combine base pixmap with alpha mask
+                        combined_pix = pymupdf.Pixmap(base_pix, mask_pix)
+                        image_bytes = combined_pix.tobytes("png")
                         ext = "png"
+                    except Exception:
+                        # Fallback to standard extraction
+                        raw_dict = doc.extract_image(xref)
+                        image_bytes = raw_dict.get("image", b"")
+                        ext = raw_dict.get("ext", "png")
+                else:
+                    # Case B: Standard image without mask
+                    try:
+                        raw_dict = doc.extract_image(xref)
+                        image_bytes = raw_dict.get("image", b"")
+                        ext = raw_dict.get("ext", "png")
+                        width = raw_dict.get("width", width)
+                        height = raw_dict.get("height", height)
+                        colorspace = raw_dict.get("colorspace", colorspace)
+                        bpc = raw_dict.get("bpc", bpc)
                     except Exception:
                         pass
 
-            if not image_bytes:
-                continue
+                    # If raw extraction was empty or failed, fallback to Pixmap
+                    if not image_bytes:
+                        try:
+                            pix = pymupdf.Pixmap(doc, xref)
+                            if pix.n >= 5:
+                                pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                            image_bytes = pix.tobytes("png")
+                            ext = "png"
+                        except Exception:
+                            pass
 
-            # Check duplication by hash
-            img_hash = compute_sha256(image_bytes)
-            xref_to_hash[xref] = img_hash
+                if not image_bytes:
+                    continue
 
-            if img_hash in hash_to_index:
-                idx = hash_to_index[img_hash]
-                existing = extracted_images[idx]
-                if pno not in existing["pages"]:
-                    existing["pages"].append(pno)
-                if placements:
-                    existing["placements"].extend(placements)
-                continue
+                # Check duplication by hash
+                img_hash = compute_sha256(image_bytes)
+                xref_to_key[xref] = img_hash
 
-            # Save unique image to disk
-            clean_ext = ext.lower().replace("jpeg", "jpg")
-            filename = f"image_{img_counter:03d}_xref{xref}.{clean_ext}"
-            file_path = images_dir / filename
+                if img_hash in hash_to_index:
+                    idx = hash_to_index[img_hash]
+                    existing = extracted_images[idx]
+                    if pno not in existing["pages"]:
+                        existing["pages"].append(pno)
+                    if placements:
+                        existing["placements"].extend(placements)
+                    continue
 
-            try:
-                with open(file_path, "wb") as f:
-                    f.write(image_bytes)
-            except Exception:
-                continue
+                # Save unique image to disk
+                clean_ext = ext.lower().replace("jpeg", "jpg")
+                filename = f"image_{img_counter:03d}_xref{xref}.{clean_ext}"
+                file_path = images_dir / filename
 
-            file_size = len(image_bytes)
+                try:
+                    with open(file_path, "wb") as f:
+                        f.write(image_bytes)
+                except Exception:
+                    continue
+
+                file_path_str = str(file_path)
+                file_size = len(image_bytes)
+
             aspect_ratio = round(width / height, 2) if height > 0 else 1.0
 
             # Determine dominant DPI across placements
@@ -161,7 +183,7 @@ def extract_images(
             img_record = {
                 "id": img_counter,
                 "filename": f"images/{filename}",
-                "file_path": str(file_path),
+                "file_path": file_path_str,
                 "xref": xref,
                 "smask_xref": smask if smask > 0 else None,
                 "format": clean_ext.upper(),
@@ -173,7 +195,7 @@ def extract_images(
                 "has_transparency": has_transparency,
                 "file_size_bytes": file_size,
                 "file_size": format_bytes(file_size),
-                "sha256": img_hash,
+                "sha256": img_hash if write_files else None,
                 "pages": [pno],
                 "placements": placements,
                 "effective_dpi": avg_dpi,

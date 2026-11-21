@@ -1,5 +1,5 @@
 """
-Modern Studio-Grade Desktop GUI (v2.3) for PDF Deep Asset & Metadata Extractor.
+Modern Studio-Grade Desktop GUI (v2.4) for PDF Deep Asset & Metadata Extractor.
 Features horizontal Split-View layout, Single-PDF Pre-Flight thumbnail preview,
 seamless multi-PDF / folder Batch Queue, 1-click presets, crisp adaptive icons,
 Light/Dark theme toggle, deterministic progress, and clickable folder result badges.
@@ -25,9 +25,12 @@ from .core import (
     extract_pdf_assets,
     extract_batch_pdfs,
     inspect_pdf_preflight,
+    inspect_pdf_print_readiness,
+    inspect_batch_print_readiness,
     resolve_unique_output_dir,
     collect_pdf_paths,
 )
+from .reporters.html_reporter import generate_html_report
 from .utils.helpers import format_bytes
 from .utils.icons import get_ctk_icon
 from .utils.i18n import (
@@ -36,6 +39,7 @@ from .utils.i18n import (
     load_preferences,
     save_preferences,
     format_preflight_badge_label,
+    format_preflight_check,
 )
 
 PRESET_KEYS = ("preset_full", "preset_graphics", "preset_fonts", "preset_audit")
@@ -99,8 +103,8 @@ class PDFExtractorApp(BaseWindow):
         ctk.set_default_color_theme("blue")
 
         self.title("PDF Asset Extractor")
-        self.geometry("960x630")
-        self.minsize(900, 580)
+        self.geometry("960x680")
+        self.minsize(900, 640)
         self.configure(fg_color=PALETTE["bg"])
 
         ico_path = _resolve_asset_path("assets/app_icon.ico")
@@ -117,6 +121,7 @@ class PDFExtractorApp(BaseWindow):
         self.last_result: dict | None = None
         self.is_extracting = False
         self.thumb_ctk_img = None
+        self._pf_modal = None
 
         # Preload crisp adaptive icons
         self.icons = {
@@ -166,7 +171,7 @@ class PDFExtractorApp(BaseWindow):
 
         self.ver_badge = ctk.CTkLabel(
             self.brand_frame,
-            text="v2.3",
+            text="v2.4",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color=PALETTE["badge_bg"],
             text_color=PALETTE["text_muted"],
@@ -450,7 +455,23 @@ class PDFExtractorApp(BaseWindow):
             font=ctk.CTkFont(size=12),
             command=lambda: self._browse_pdfs(replace=True)
         )
-        self.change_btn.pack(side="right")
+        self.change_btn.pack(side="left", padx=(0, 6))
+
+        self.reset_btn = ctk.CTkButton(
+            pv_btns,
+            text="×",
+            width=32,
+            height=30,
+            corner_radius=8,
+            fg_color=PALETTE["surface_alt"],
+            hover_color=PALETTE["badge_bg"],
+            text_color=PALETTE["text_muted"],
+            border_width=1,
+            border_color=PALETTE["border"],
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self._clear_queue
+        )
+        self.reset_btn.pack(side="right")
 
     def _build_batch_view(self):
         self.batch_view = ctk.CTkFrame(self.left_card, fg_color="transparent")
@@ -652,12 +673,27 @@ class PDFExtractorApp(BaseWindow):
 
         # 4. Action CTA + Progress
         self.cta_frame = ctk.CTkFrame(self.right_card, fg_color="transparent")
-        self.cta_frame.pack(fill="x", padx=18, pady=(2, 8))
+        self.cta_frame.pack(fill="x", padx=18, pady=(2, 6))
+
+        self.preflight_btn = ctk.CTkButton(
+            self.cta_frame,
+            text=tr(self.lang, "btn_preflight"),
+            height=32,
+            corner_radius=8,
+            fg_color=PALETTE["surface_alt"],
+            hover_color=PALETTE["badge_bg"],
+            text_color=PALETTE["accent"],
+            border_width=1,
+            border_color=PALETTE["border_active"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._start_preflight_only
+        )
+        self.preflight_btn.pack(fill="x", pady=(0, 6))
 
         self.extract_btn = ctk.CTkButton(
             self.cta_frame,
             text=tr(self.lang, "btn_extract"),
-            height=42,
+            height=38,
             corner_radius=8,
             fg_color=PALETTE["accent"],
             hover_color=PALETTE["accent_hover"],
@@ -713,11 +749,11 @@ class PDFExtractorApp(BaseWindow):
         self.chips_row = ctk.CTkFrame(self.results_card, fg_color="transparent")
         self.chips_row.pack(fill="x", padx=14, pady=(0, 10))
 
-        res_btns = ctk.CTkFrame(self.results_card, fg_color="transparent")
-        res_btns.pack(fill="x", padx=14, pady=(0, 12))
+        self.res_btns = ctk.CTkFrame(self.results_card, fg_color="transparent")
+        self.res_btns.pack(fill="x", padx=14, pady=(0, 12))
 
         self.open_dir_btn = ctk.CTkButton(
-            res_btns,
+            self.res_btns,
             text=tr(self.lang, "btn_open_out"),
             image=self.icons["folder"],
             compound="left",
@@ -731,7 +767,7 @@ class PDFExtractorApp(BaseWindow):
         self.open_dir_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         self.open_html_btn = ctk.CTkButton(
-            res_btns,
+            self.res_btns,
             text=tr(self.lang, "btn_open_html"),
             image=self.icons["globe"],
             compound="left",
@@ -746,6 +782,17 @@ class PDFExtractorApp(BaseWindow):
             command=self._open_html_report
         )
         self.open_html_btn.pack(side="left", fill="x", expand=True)
+
+        self.open_pf_modal_btn = ctk.CTkButton(
+            self.res_btns,
+            text=tr(self.lang, "btn_open_preflight_modal"),
+            height=34,
+            corner_radius=8,
+            fg_color=PALETTE["accent"],
+            hover_color=PALETTE["accent_hover"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._open_preflight_modal
+        )
 
     # ---------------------------------------------------------
     # INTERACTIONS, QUEUE MANAGEMENT & LOGIC
@@ -810,12 +857,16 @@ class PDFExtractorApp(BaseWindow):
         if not self.is_extracting:
             self._sync_view_to_queue()
         else:
+            self.preflight_btn.configure(text=tr(L, "btn_processing"))
             self.extract_btn.configure(text=tr(L, "btn_processing"))
             self._refresh_dest_hint()
 
         if self.results_card.winfo_ismapped() and self.last_result:
-            if self.last_result.get("mode") == "batch":
+            mode = self.last_result.get("mode")
+            if mode == "batch":
                 self._populate_batch_results_card(self.last_result)
+            elif mode in ("preflight_only", "batch_preflight_only"):
+                self._populate_preflight_results_card(self.last_result)
             else:
                 self._populate_single_results_card(self.last_result)
 
@@ -948,16 +999,19 @@ class PDFExtractorApp(BaseWindow):
         count = len(self.queued_pdfs)
         if count == 0:
             self._show_left_mode("dropzone")
+            self.preflight_btn.configure(text=tr(self.lang, "btn_preflight"))
             self.extract_btn.configure(text=tr(self.lang, "btn_extract"))
             self.status_lbl.configure(text=tr(self.lang, "status_idle"), text_color=PALETTE["text_muted"])
             self._refresh_dest_hint()
         elif count == 1:
             self._render_single_preview(self.queued_pdfs[0], password=self.pdf_password)
+            self.preflight_btn.configure(text=tr(self.lang, "btn_preflight"))
             self.extract_btn.configure(text=tr(self.lang, "btn_extract"))
             self._refresh_dest_hint()
         else:
             self._render_batch_queue()
             self._show_left_mode("batch")
+            self.preflight_btn.configure(text=tr(self.lang, "btn_preflight_batch", n=count))
             self.extract_btn.configure(text=tr(self.lang, "btn_extract_batch", n=count))
             self.status_lbl.configure(text=tr(self.lang, "status_batch_ready", n=count), text_color=PALETTE["text_muted"])
             self._refresh_dest_hint()
@@ -1113,7 +1167,7 @@ class PDFExtractorApp(BaseWindow):
     # ---------------------------------------------------------
     # EXTRACTION EXECUTION (Single & Batch)
     # ---------------------------------------------------------
-    def _start_extraction(self):
+    def _begin_worker(self, target_fn, indeterminate: bool = False):
         if not self.queued_pdfs:
             messagebox.showwarning(
                 tr(self.lang, "dlg_no_pdf_title"),
@@ -1125,13 +1179,26 @@ class PDFExtractorApp(BaseWindow):
 
         self.is_extracting = True
         self.results_card.pack_forget()
+        self.preflight_btn.configure(state="disabled", text=tr(self.lang, "btn_processing"))
         self.extract_btn.configure(state="disabled", text=tr(self.lang, "btn_processing"))
         self._set_batch_controls_enabled(False)
-        self.progress_bar.pack(fill="x", pady=(8, 0))
-        self.progress_bar.set(0.03)
+        self.progress_bar.pack(fill="x", pady=(6, 0))
+        if indeterminate:
+            self.progress_bar.configure(mode="indeterminate")
+            self.progress_bar.start()
+        else:
+            self.progress_bar.stop()
+            self.progress_bar.configure(mode="determinate")
+            self.progress_bar.set(0.03)
 
-        thread = threading.Thread(target=self._run_worker, daemon=True)
+        thread = threading.Thread(target=target_fn, daemon=True)
         thread.start()
+
+    def _start_preflight_only(self):
+        self._begin_worker(self._run_preflight_worker, indeterminate=True)
+
+    def _start_extraction(self):
+        self._begin_worker(self._run_worker, indeterminate=False)
 
     def _set_batch_controls_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"
@@ -1140,6 +1207,7 @@ class PDFExtractorApp(BaseWindow):
             self.batch_clear_btn.configure(state=state)
             self.add_more_btn.configure(state=state)
             self.change_btn.configure(state=state)
+            self.reset_btn.configure(state=state)
         except Exception:
             pass
 
@@ -1193,7 +1261,11 @@ class PDFExtractorApp(BaseWindow):
             self.after(0, self._on_error, str(e))
 
     def _update_progress(self, msg: str, pct: float):
-        self.progress_bar.set(pct)
+        try:
+            if self.progress_bar.cget("mode") == "determinate":
+                self.progress_bar.set(pct)
+        except Exception:
+            pass
         self.status_lbl.configure(text=msg, text_color=PALETTE["text_muted"])
 
     def _update_batch_item_ui(self, pdf_path: Path, status: str, payload):
@@ -1208,18 +1280,28 @@ class PDFExtractorApp(BaseWindow):
             badge.configure(text=tr(self.lang, "status_running"), fg_color="#0284C7", text_color="#FFFFFF")
             btn.configure(state="disabled")
         elif status == "success":
-            badge.configure(text=tr(self.lang, "status_ok"), fg_color="#059669", text_color="#FFFFFF")
-            out_folder = Path(payload["output_directory"])
-            sub_lbl.configure(text=f"→ {out_folder.name}")
-            btn.configure(
-                text=tr(self.lang, "btn_open"),
-                width=46,
-                state="normal",
-                fg_color=PALETTE["surface_alt"],
-                text_color=PALETTE["accent"],
-                font=ctk.CTkFont(size=11, weight="bold"),
-                command=lambda p=out_folder: self._open_path(p)
-            )
+            out_dir_str = payload.get("output_directory") if isinstance(payload, dict) else None
+            if out_dir_str:
+                badge.configure(text=tr(self.lang, "status_ok"), fg_color="#059669", text_color="#FFFFFF")
+                out_folder = Path(out_dir_str)
+                sub_lbl.configure(text=f"→ {out_folder.name}")
+                btn.configure(
+                    text=tr(self.lang, "btn_open"),
+                    width=46,
+                    state="normal",
+                    fg_color=PALETTE["surface_alt"],
+                    text_color=PALETTE["accent"],
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    command=lambda p=out_folder: self._open_path(p)
+                )
+            else:
+                audit = (payload or {}).get("preflight_audit") or {}
+                pf_st = audit.get("status", "pass")
+                pf_col = {"pass": "#059669", "warn": "#D97706", "fail": "#DC2626"}.get(pf_st, "#059669")
+                pf_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(pf_st, "pf_badge_pass")
+                badge.configure(text=tr(self.lang, pf_key), fg_color=pf_col, text_color="#FFFFFF")
+                sub_lbl.configure(text=format_preflight_badge_label(audit, self.lang))
+                btn.configure(state="disabled", text="·")
         elif status == "error":
             badge.configure(text=tr(self.lang, "status_error"), fg_color="#DC2626", text_color="#FFFFFF")
             err_short = str(payload)[:36] + ("..." if len(str(payload)) > 36 else "")
@@ -1234,7 +1316,358 @@ class PDFExtractorApp(BaseWindow):
                 )
             )
 
+    def _run_preflight_worker(self):
+        files_snapshot = list(self.queued_pdfs)
+        run_lang = self.lang
+
+        def _on_progress(msg: str, pct: float):
+            self.after(0, lambda m=msg, p=pct: self._update_progress(m, p))
+
+        def _on_batch_item(idx: int, total: int, pdf_p: Path, status: str, payload):
+            self.after(0, lambda: self._update_batch_item_ui(pdf_p, status, payload))
+
+        try:
+            if len(files_snapshot) == 1:
+                res = inspect_pdf_print_readiness(
+                    pdf_path=files_snapshot[0],
+                    password=self.pdf_password,
+                    progress_callback=_on_progress,
+                    lang=run_lang,
+                )
+            else:
+                res = inspect_batch_print_readiness(
+                    pdf_paths=files_snapshot,
+                    password=self.pdf_password,
+                    progress_callback=_on_progress,
+                    item_callback=_on_batch_item,
+                    lang=run_lang,
+                )
+            self.last_result = res
+            self.after(0, self._on_preflight_success, res)
+        except Exception as e:
+            self.after(0, self._on_error, str(e))
+
+    def _populate_preflight_results_card(self, res: dict):
+        is_batch = res.get("mode") == "batch_preflight_only"
+        self.status_lbl.configure(text=tr(self.lang, "status_pf_done"), text_color=PALETTE["accent"])
+
+        self.chips_row.pack_forget()
+        self.open_dir_btn.pack_forget()
+
+        if is_batch:
+            succ = res["succeeded"]
+            tot = res["total_files"]
+            failed = res["failed"]
+            agg = res["aggregate_summary"]
+            has_issues = failed > 0 or agg.get("preflight_fail", 0) > 0 or agg.get("preflight_warn", 0) > 0
+            title_txt = (
+                tr(self.lang, "res_pf_batch_done", s=succ, t=tot)
+                if failed == 0
+                else tr(self.lang, "res_pf_batch_partial", s=succ, t=tot, f=failed)
+            )
+            pf_parts = []
+            if agg.get("preflight_pass", 0):
+                pf_parts.append(f"{agg['preflight_pass']} {tr(self.lang, 'pf_badge_pass')}")
+            if agg.get("preflight_warn", 0):
+                pf_parts.append(f"{agg['preflight_warn']} {tr(self.lang, 'pf_badge_warn')}")
+            if agg.get("preflight_fail", 0):
+                pf_parts.append(f"{agg['preflight_fail']} {tr(self.lang, 'pf_badge_fail')}")
+            pf_col = "#EF4444" if agg.get("preflight_fail", 0) else ("#F59E0B" if agg.get("preflight_warn", 0) else "#10B981")
+            self.res_preflight_lbl.configure(text=f"Preflight: {' · '.join(pf_parts)}" if pf_parts else "", text_color=pf_col)
+            self.results_card.configure(
+                fg_color=PALETTE["warn_bg"] if has_issues else PALETTE["success_bg"],
+                border_color=PALETTE["warn_border"] if has_issues else PALETTE["success_border"],
+            )
+            self.res_title_lbl.configure(
+                text=title_txt,
+                text_color="#F59E0B" if has_issues else PALETTE["success_text"],
+            )
+            self.open_pf_modal_btn.pack_forget()
+            self.open_html_btn.pack_forget()
+            self.open_pf_modal_btn.pack(side="left", fill="x", expand=True)
+            self.open_pf_modal_btn.configure(text=tr(self.lang, "btn_open_preflight_modal"))
+        else:
+            audit = res.get("preflight_audit") or {}
+            pf_st = audit.get("status", "pass")
+            pf_col = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(pf_st, PALETTE["text_muted"])
+            self.res_preflight_lbl.configure(text=format_preflight_badge_label(audit, self.lang), text_color=pf_col)
+            if pf_st == "pass":
+                self.results_card.configure(fg_color=PALETTE["success_bg"], border_color=PALETTE["success_border"])
+                self.res_title_lbl.configure(text=tr(self.lang, "res_pf_done"), text_color=PALETTE["success_text"])
+            else:
+                self.results_card.configure(fg_color=PALETTE["warn_bg"], border_color=PALETTE["warn_border"])
+                self.res_title_lbl.configure(text=tr(self.lang, "res_pf_done"), text_color=pf_col)
+
+            self.open_pf_modal_btn.pack_forget()
+            self.open_html_btn.pack_forget()
+            self.open_pf_modal_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            self.open_pf_modal_btn.configure(text=tr(self.lang, "btn_open_preflight_modal"))
+            self.open_html_btn.pack(side="left", fill="x", expand=True)
+            self.open_html_btn.configure(
+                text=tr(self.lang, "btn_export_pf_html"),
+                state="normal",
+                command=self._export_preflight_html,
+            )
+
+    def _on_preflight_success(self, res: dict):
+        self.is_extracting = False
+        self.progress_bar.stop()
+        self.progress_bar.pack_forget()
+        self._set_batch_controls_enabled(True)
+        cnt = len(self.queued_pdfs)
+        self.preflight_btn.configure(
+            state="normal",
+            text=tr(self.lang, "btn_preflight_batch", n=cnt) if cnt > 1 else tr(self.lang, "btn_preflight"),
+        )
+        self.extract_btn.configure(
+            state="normal",
+            text=tr(self.lang, "btn_extract_batch", n=cnt) if cnt > 1 else tr(self.lang, "btn_extract"),
+        )
+        self._populate_preflight_results_card(res)
+        self.results_card.pack(fill="x", padx=18, pady=(4, 12))
+
+    def _open_preflight_modal(self):
+        if not self.last_result:
+            return
+        if self._pf_modal is not None and self._pf_modal.winfo_exists():
+            self._pf_modal.lift()
+            self._pf_modal.focus_force()
+            return
+
+        res = self.last_result
+        is_batch = res.get("mode") == "batch_preflight_only"
+        L = self.lang
+
+        modal = ctk.CTkToplevel(self)
+        self._pf_modal = modal
+        modal.title(tr(L, "pf_modal_title"))
+        modal.configure(fg_color=PALETTE["bg"])
+        modal.transient(self)
+
+        # Center over parent window
+        w, h = 720, 560
+        px = self.winfo_rootx() + max((self.winfo_width() - w) // 2, 20)
+        py = self.winfo_rooty() + max((self.winfo_height() - h) // 2, 20)
+        modal.geometry(f"{w}x{h}+{px}+{py}")
+        modal.minsize(620, 460)
+
+        ico_path = _resolve_asset_path("assets/app_icon.ico")
+        if ico_path and sys.platform == "win32":
+            try:
+                modal.after(150, lambda: modal.iconbitmap(str(ico_path)))
+            except Exception:
+                pass
+
+        # Header
+        hdr = ctk.CTkFrame(modal, corner_radius=10, fg_color=PALETTE["surface"], border_width=1, border_color=PALETTE["border"])
+        hdr.pack(fill="x", padx=18, pady=(16, 10))
+
+        hdr_left = ctk.CTkFrame(hdr, fg_color="transparent")
+        hdr_left.pack(side="left", fill="x", expand=True, padx=14, pady=12)
+
+        if is_batch:
+            agg = res.get("aggregate_summary") or {}
+            head_title = tr(L, "res_pf_batch_done", s=res.get("succeeded", 0), t=res.get("total_files", 0))
+            head_sub = f"{agg.get('total_pages', 0)} {tr(L, 'th_pages')} · {agg.get('total_images', 0)} {tr(L, 'th_imgs')} · {agg.get('total_fonts', 0)} {tr(L, 'tab_fonts')}"
+            badge_txt = f"{agg.get('preflight_pass', 0)} OK · {agg.get('preflight_warn', 0)} {tr(L, 'pf_badge_warn')} · {agg.get('preflight_fail', 0)} {tr(L, 'pf_badge_fail')}"
+            badge_col = "#EF4444" if agg.get("preflight_fail", 0) else ("#F59E0B" if agg.get("preflight_warn", 0) else "#10B981")
+        else:
+            s = res.get("summary") or {}
+            audit = res.get("preflight_audit") or {}
+            head_title = s.get("file_name") or Path(res.get("source_pdf", "PDF")).name
+            pages_txt = tr(L, "page_singular") if s.get("total_pages", 0) == 1 else tr(L, "page_plural", n=s.get("total_pages", 0))
+            head_sub = f"{pages_txt} · {s.get('file_size', '')} · {s.get('total_images', 0)} {tr(L, 'th_imgs')} · {s.get('total_fonts', 0)} {tr(L, 'tab_fonts')}"
+            badge_txt = format_preflight_badge_label(audit, L)
+            badge_col = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(audit.get("status", "pass"), "#10B981")
+
+        ctk.CTkLabel(hdr_left, text=head_title, font=ctk.CTkFont(size=15, weight="bold"), text_color=PALETTE["text"], anchor="w").pack(fill="x")
+        ctk.CTkLabel(hdr_left, text=head_sub, font=ctk.CTkFont(size=11), text_color=PALETTE["text_muted"], anchor="w").pack(fill="x", pady=(2, 0))
+
+        ctk.CTkLabel(
+            hdr,
+            text=badge_txt,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=PALETTE["surface_alt"],
+            text_color=badge_col,
+            corner_radius=8,
+            padx=12,
+            pady=5,
+        ).pack(side="right", padx=14)
+
+        # Scrollable details body
+        scroll = ctk.CTkScrollableFrame(modal, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+
+        def _render_check_card(parent, chk: dict, thresholds: dict, show_tip: bool = True):
+            cid = chk.get("id", "")
+            st = chk.get("status", "pass")
+            b_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(st, "pf_badge_skip")
+            b_col = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(st, PALETTE["text_muted"])
+
+            card = ctk.CTkFrame(parent, corner_radius=10, fg_color=PALETTE["surface"], border_width=1, border_color=PALETTE["border"])
+            card.pack(fill="x", pady=(0, 8), padx=4)
+
+            top_r = ctk.CTkFrame(card, fg_color="transparent")
+            top_r.pack(fill="x", padx=12, pady=(10, 4))
+            ctk.CTkLabel(top_r, text=tr(L, f"pf_check_{cid}"), font=ctk.CTkFont(size=13, weight="bold"), text_color=PALETTE["text"], anchor="w").pack(side="left")
+            ctk.CTkLabel(
+                top_r,
+                text=tr(L, b_key),
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color=PALETTE["surface_alt"],
+                text_color=b_col,
+                corner_radius=6,
+                padx=8,
+                pady=2,
+            ).pack(side="right")
+
+            ctk.CTkLabel(
+                card,
+                text=format_preflight_check(chk, thresholds, L),
+                font=ctk.CTkFont(size=12),
+                text_color=PALETTE["text"],
+                anchor="w",
+                justify="left",
+                wraplength=630,
+            ).pack(fill="x", padx=12, pady=(0, 4))
+
+            aff_parts = []
+            for det in (chk.get("details") or [])[:5]:
+                if "dpi" in det:
+                    aff_parts.append(f"• {det.get('file', '')}: {det['dpi']} DPI (pag. {', '.join(str(p) for p in det.get('pages', []))})")
+                elif "colorspace" in det:
+                    aff_parts.append(f"• {det.get('file', '')} [{det['colorspace']}] (pag. {', '.join(str(p) for p in det.get('pages', []))})")
+                elif "name" in det:
+                    aff_parts.append(f"• {det['name']} (pag. {', '.join(str(p) for p in det.get('pages', []))})")
+            if not aff_parts and chk.get("affected_pages"):
+                pages_str = ", ".join(str(p) for p in chk["affected_pages"][:15])
+                if len(chk["affected_pages"]) > 15:
+                    pages_str += "..."
+                aff_parts.append(tr(L, "pf_pages_affected", pages=pages_str))
+
+            if aff_parts:
+                ctk.CTkLabel(
+                    card,
+                    text="\n".join(aff_parts),
+                    font=ctk.CTkFont(size=11),
+                    text_color=PALETTE["accent"],
+                    anchor="w",
+                    justify="left",
+                    wraplength=630,
+                ).pack(fill="x", padx=14, pady=(0, 6))
+
+            if show_tip and st != "skipped":
+                tip_key = f"pf_tip_{cid}_{'ok' if st == 'pass' else 'issue'}"
+                tip_box = ctk.CTkFrame(card, corner_radius=6, fg_color=PALETTE["surface_alt"])
+                tip_box.pack(fill="x", padx=12, pady=(2, 10))
+                ctk.CTkLabel(
+                    tip_box,
+                    text=f"{tr(L, 'pf_modal_advice_lbl')} {tr(L, tip_key)}",
+                    font=ctk.CTkFont(size=11),
+                    text_color=PALETTE["text_muted"],
+                    anchor="w",
+                    justify="left",
+                    wraplength=610,
+                ).pack(fill="x", padx=10, pady=6)
+            else:
+                ctk.CTkFrame(card, height=4, fg_color="transparent").pack()
+
+        if is_batch:
+            for item in res.get("items", []):
+                doc_card = ctk.CTkFrame(scroll, corner_radius=10, fg_color=PALETTE["surface"], border_width=1, border_color=PALETTE["border"])
+                doc_card.pack(fill="x", pady=(0, 8), padx=4)
+                d_top = ctk.CTkFrame(doc_card, fg_color="transparent")
+                d_top.pack(fill="x", padx=12, pady=(10, 6))
+                ctk.CTkLabel(d_top, text=item.get("file_name", ""), font=ctk.CTkFont(size=13, weight="bold"), text_color=PALETTE["text"]).pack(side="left")
+
+                if item.get("status") != "success":
+                    ctk.CTkLabel(d_top, text=tr(L, "status_error"), font=ctk.CTkFont(size=10, weight="bold"), text_color="#EF4444").pack(side="right")
+                    ctk.CTkLabel(doc_card, text=item.get("error") or "", font=ctk.CTkFont(size=11), text_color="#EF4444", anchor="w", wraplength=630).pack(fill="x", padx=12, pady=(0, 10))
+                    continue
+
+                item_audit = item.get("preflight_audit") or {}
+                it_st = item_audit.get("status", "pass")
+                it_col = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(it_st, "#10B981")
+                ctk.CTkLabel(d_top, text=format_preflight_badge_label(item_audit, L), font=ctk.CTkFont(size=11, weight="bold"), text_color=it_col).pack(side="right")
+
+                it_thresh = item_audit.get("thresholds") or {}
+                for chk in item_audit.get("checks", []):
+                    st = chk.get("status", "pass")
+                    b_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(st, "pf_badge_skip")
+                    b_col = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(st, PALETTE["text_muted"])
+                    r = ctk.CTkFrame(doc_card, fg_color="transparent")
+                    r.pack(fill="x", padx=12, pady=2)
+                    ctk.CTkLabel(r, text=tr(L, b_key), width=58, font=ctk.CTkFont(size=10, weight="bold"), text_color=b_col, anchor="w").pack(side="left")
+                    ctk.CTkLabel(r, text=format_preflight_check(chk, it_thresh, L), font=ctk.CTkFont(size=11), text_color=PALETTE["text_muted"], anchor="w", wraplength=560, justify="left").pack(side="left", fill="x", expand=True)
+                ctk.CTkFrame(doc_card, height=8, fg_color="transparent").pack()
+        else:
+            audit = res.get("preflight_audit") or {}
+            thresholds = audit.get("thresholds") or {}
+            for chk in audit.get("checks", []):
+                _render_check_card(scroll, chk, thresholds, show_tip=True)
+
+        # Footer buttons
+        ftr = ctk.CTkFrame(modal, fg_color="transparent")
+        ftr.pack(fill="x", padx=18, pady=(4, 14))
+        if not is_batch:
+            ctk.CTkButton(
+                ftr,
+                text=tr(L, "btn_export_pf_html"),
+                image=self.icons["globe"],
+                compound="left",
+                height=34,
+                corner_radius=8,
+                fg_color=PALETTE["surface_alt"],
+                hover_color=PALETTE["badge_bg"],
+                text_color=PALETTE["text"],
+                border_width=1,
+                border_color=PALETTE["border"],
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=self._export_preflight_html,
+            ).pack(side="left")
+
+        ctk.CTkButton(
+            ftr,
+            text=tr(L, "pf_modal_close"),
+            width=110,
+            height=34,
+            corner_radius=8,
+            fg_color=PALETTE["accent"],
+            hover_color=PALETTE["accent_hover"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=modal.destroy,
+        ).pack(side="right")
+
+        modal.bind("<Escape>", lambda e: modal.destroy())
+        modal.grab_set()
+        modal.focus_force()
+
+    def _export_preflight_html(self):
+        if not self.last_result or self.last_result.get("mode") != "preflight_only":
+            return
+        src_name = Path(self.last_result.get("source_pdf", "document.pdf")).stem
+        save_path = filedialog.asksaveasfilename(
+            title=tr(self.lang, "dlg_save_pf_html"),
+            defaultextension=".html",
+            initialfile=f"{src_name}_preflight.html",
+            filetypes=[("HTML Report (*.html)", "*.html")],
+        )
+        if not save_path:
+            return
+        target = Path(save_path)
+        generated = generate_html_report(self.last_result, target.parent, lang=self.lang)
+        if target != generated:
+            try:
+                generated.replace(target)
+            except Exception:
+                target = generated
+        webbrowser.open(target.as_uri())
+
     def _populate_single_results_card(self, res: dict):
+        self.open_pf_modal_btn.pack_forget()
+        self.chips_row.pack(fill="x", padx=14, pady=(0, 10), before=self.res_btns)
+        self.open_dir_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
         out_dir = Path(res["output_directory"])
         self.status_lbl.configure(text=tr(self.lang, "status_saved_in", name=out_dir.name), text_color="#10B981")
 
@@ -1262,27 +1695,34 @@ class PDFExtractorApp(BaseWindow):
         ]
         self._render_result_chips(chips_spec)
 
-        self.open_dir_btn.configure(text=tr(self.lang, "btn_open_out"))
+        self.open_dir_btn.configure(text=tr(self.lang, "btn_open_out"), command=self._open_output_folder)
         self.open_html_btn.pack(side="left", fill="x", expand=True)
         self.open_html_btn.configure(
             text=tr(self.lang, "btn_open_html"),
             state="normal" if res.get("html_report") else "disabled",
+            command=self._open_html_report,
         )
 
     def _on_single_success(self, res: dict):
         self.is_extracting = False
+        self.progress_bar.stop()
         self.progress_bar.pack_forget()
         self._set_batch_controls_enabled(True)
+        self.preflight_btn.configure(state="normal", text=tr(self.lang, "btn_preflight"))
         self.extract_btn.configure(state="normal", text=tr(self.lang, "btn_extract"))
         self._refresh_dest_hint()
 
         self._populate_single_results_card(res)
-        self.results_card.pack(fill="x", padx=18, pady=(4, 14))
+        self.results_card.pack(fill="x", padx=18, pady=(4, 12))
 
         if self.chk_auto_open_html.get() and res.get("html_report"):
             self._open_html_report()
 
     def _populate_batch_results_card(self, res: dict):
+        self.open_pf_modal_btn.pack_forget()
+        self.chips_row.pack(fill="x", padx=14, pady=(0, 10), before=self.res_btns)
+        self.open_dir_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
         succ = res["succeeded"]
         tot = res["total_files"]
         failed = res["failed"]
@@ -1336,21 +1776,25 @@ class PDFExtractorApp(BaseWindow):
         self._render_result_chips(chips_spec)
 
         # In batch mode, show both the parent folder button and the unified Batch HTML Index button
-        self.open_dir_btn.configure(text=tr(self.lang, "btn_open_batch"))
+        self.open_dir_btn.configure(text=tr(self.lang, "btn_open_batch"), command=self._open_output_folder)
         self.open_html_btn.pack(side="left", fill="x", expand=True)
         self.open_html_btn.configure(
             text=tr(self.lang, "btn_open_batch_html"),
             state="normal" if res.get("html_report") else "disabled",
+            command=self._open_html_report,
         )
 
     def _on_batch_success(self, res: dict):
         self.is_extracting = False
+        self.progress_bar.stop()
         self.progress_bar.pack_forget()
         self._set_batch_controls_enabled(True)
-        self.extract_btn.configure(state="normal", text=tr(self.lang, "btn_extract_batch", n=len(self.queued_pdfs)))
+        cnt = len(self.queued_pdfs)
+        self.preflight_btn.configure(state="normal", text=tr(self.lang, "btn_preflight_batch", n=cnt))
+        self.extract_btn.configure(state="normal", text=tr(self.lang, "btn_extract_batch", n=cnt))
 
         self._populate_batch_results_card(res)
-        self.results_card.pack(fill="x", padx=18, pady=(4, 14))
+        self.results_card.pack(fill="x", padx=18, pady=(4, 12))
 
         if self.chk_auto_open_html.get() and res.get("html_report"):
             self._open_html_report()
@@ -1375,10 +1819,13 @@ class PDFExtractorApp(BaseWindow):
 
     def _on_error(self, err_msg: str):
         self.is_extracting = False
+        self.progress_bar.stop()
         self.progress_bar.pack_forget()
         self._set_batch_controls_enabled(True)
         cnt = len(self.queued_pdfs)
+        pf_txt = tr(self.lang, "btn_preflight_batch", n=cnt) if cnt > 1 else tr(self.lang, "btn_preflight")
         btn_txt = tr(self.lang, "btn_extract_batch", n=cnt) if cnt > 1 else tr(self.lang, "btn_extract")
+        self.preflight_btn.configure(state="normal", text=pf_txt)
         self.extract_btn.configure(state="normal", text=btn_txt)
         self.status_lbl.configure(text=f"{tr(self.lang, 'status_error')}: {err_msg}", text_color="#EF4444")
         messagebox.showerror(tr(self.lang, "dlg_err_title"), tr(self.lang, "dlg_err_msg", err=err_msg))

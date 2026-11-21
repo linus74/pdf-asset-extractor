@@ -1,6 +1,6 @@
 # PDF Asset & Metadata Deep Extractor
 
-> **v2.3 · by Linus74 © 2026**
+> **v2.4 · by Linus74 © 2026**
 >
 > A modern Desktop App, CLI tool, and Python library to inspect PDF internals and extract embedded images (with true transparency), vector artwork (`.svg` & `.ai`), fonts (with SFNT table repair), ICC color profiles, spot inks, pre-press page geometry, attachments, and full metadata.
 
@@ -39,7 +39,8 @@ Inside a single `.pdf` file, the original building blocks of the document often 
 
 ### 🖥️ Modern Desktop App (`PDF-Extractor.exe`)
 - **Horizontal Split-View UI** with **Dark & Light theme** toggle and **live `EN` / `IT` language switcher** (auto-detects OS language on first run and saves preferences).
-- **Instant Pre-Flight Preview**: Drag & drop a PDF to immediately inspect a rendered Page 1 thumbnail, paper format, page count, file size, authoring software, and inline password prompt if encrypted.
+- **Zero-Disk-Write Pre-Press Preflight**: Dedicated **`Preflight`** action (plus reopenable modal with actionable print tips) checks image DPI (`>= 300` / `< 150`), RGB vs CMYK color spaces, `BleedBox` margins, and font embedding in memory without creating output folders.
+- **Instant Pre-Flight Preview**: Drag & drop a PDF to immediately inspect a rendered Page 1 thumbnail, paper format, page count, file size, authoring software, inline password prompt if encrypted, and quick `×` reset.
 - **Single-File & Batch Queue**: Drop multiple PDFs or an entire folder to process them sequentially into isolated subfolders, with per-file live status and error isolation.
 - **1-Click Extraction Profiles**: `Full` · `Graphics` · `Fonts` · `Audit Only` (`Completo` · `Solo Grafica` · `Solo Font` · `Solo Analisi` in IT), plus fine-grained toggles.
 - **Optional HTML Dashboard**: Choose whether to generate `report.html` / `batch_report.html` and whether to auto-open it in your browser.
@@ -143,6 +144,10 @@ uv run pdf-extract ./pdf_folder/ -o ./batch_output
 
 # Auto-open HTML dashboard after extraction
 uv run pdf-extract document.pdf --open
+
+# Run in-memory Pre-Press Preflight check only (no files written)
+uv run pdf-extract document.pdf --preflight-only
+uv run pdf-extract ./pdf_folder/ --preflight-only
 
 # Password-protected PDF
 uv run pdf-extract locked.pdf -p "your_password"

@@ -2,6 +2,18 @@
 
 All notable changes to **PDF Asset Extractor** will be documented in this file.
 
+## [2.4.0] - 2026-11-21
+
+### Added
+- **Pre-Press & Print Readiness Audit (Preflight)**:
+  - Automated technical audit checking image effective DPI (`< 150 DPI` Fail, `< 300 DPI` Warn, `>= 300 DPI` Pass), color space consistency (detecting RGB images or mixed RGB+CMYK documents), `BleedBox` vs `TrimBox`/`MediaBox` print bleed margins, and embedded vs non-embedded system fonts.
+  - Integrated into `report.json`, a clickable header badge & dedicated **`Print Check` / `Preflight Stampa`** tab in `report.html`, a **`Preflight`** status column in `batch_report.html`, Rich CLI summary tables, and GUI result badges.
+- **Zero-Disk-Write In-Memory Preflight Mode**:
+  - Dedicated **`Preflight`** button in the Desktop GUI (and **`--preflight-only`** CLI flag) running `inspect_pdf_print_readiness` / `inspect_batch_print_readiness` purely in memory without creating output folders or writing extracted assets.
+  - Dedicated **reopenable Preflight Modal (`View Preflight Report` / `Apri Report Preflight`)** showing affected items, page numbers, actionable print tips, and optional **`Save HTML Report...`** export.
+- **Desktop UX Refinement**: Added a quick **`×`** reset button below the single-PDF preview to return to the dropzone cleanly when dragging & dropping new files.
+- **Automated Tests**: Added `test_print_readiness_audit` and `test_in_memory_preflight_zero_disk_writes` verifying DPI/color/bleed/font audit rules and zero filesystem side effects.
+
 ## [2.3.0] - 2026-11-18
 
 ### Added

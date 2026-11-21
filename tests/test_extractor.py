@@ -353,3 +353,33 @@ def test_print_readiness_audit(tmp_path):
     assert mixed_checks["image_resolution"]["status"] == "warn"
     assert mixed_checks["color_spaces"]["reason"] == "mixed"
     assert mixed_checks["fonts_embedding"]["status"] == "fail"
+
+
+def test_in_memory_preflight_zero_disk_writes(tmp_path):
+    from pdf_extractor.core import inspect_pdf_print_readiness, inspect_batch_print_readiness
+
+    work_dir = tmp_path / "isolated"
+    work_dir.mkdir()
+    pdf_a = create_comprehensive_test_pdf(work_dir / "doc_a.pdf")
+    pdf_b = create_comprehensive_test_pdf(work_dir / "doc_b.pdf")
+    bad_pdf = work_dir / "bad.pdf"
+    bad_pdf.write_bytes(b"invalid pdf")
+
+    before_entries = sorted(p.name for p in work_dir.iterdir())
+
+    # Single PDF in-memory preflight creates zero directories or files
+    res = inspect_pdf_print_readiness(pdf_a, lang="it")
+    assert res["mode"] == "preflight_only"
+    assert res["output_directory"] is None
+    assert res["preflight_audit"]["status"] == "fail"
+    assert sorted(p.name for p in work_dir.iterdir()) == before_entries
+
+    # Batch in-memory preflight isolates errors and creates zero directories or files
+    batch_res = inspect_batch_print_readiness([pdf_a, pdf_b, bad_pdf], lang="en")
+    assert batch_res["mode"] == "batch_preflight_only"
+    assert batch_res["output_directory"] is None
+    assert batch_res["total_files"] == 3
+    assert batch_res["succeeded"] == 2
+    assert batch_res["failed"] == 1
+    assert batch_res["aggregate_summary"]["preflight_fail"] == 2
+    assert sorted(p.name for p in work_dir.iterdir()) == before_entries

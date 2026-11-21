@@ -12,7 +12,13 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .core import extract_pdf_assets, extract_batch_pdfs, collect_pdf_paths
+from .core import (
+    extract_pdf_assets,
+    extract_batch_pdfs,
+    inspect_pdf_print_readiness,
+    inspect_batch_print_readiness,
+    collect_pdf_paths,
+)
 from .utils.i18n import (
     get_default_language,
     SUPPORTED_LANGS,
@@ -49,6 +55,7 @@ console = Console(legacy_windows=False)
 @click.option("--no-attachments", is_flag=True, help="Disable embedded attachment extraction")
 @click.option("--no-html", is_flag=True, help="Do not generate interactive HTML report")
 @click.option("--open", "open_report", is_flag=True, help="Automatically open the HTML report in browser when done")
+@click.option("--preflight-only", is_flag=True, help="Run in-memory Print Readiness Audit without writing any output files")
 @click.option("-p", "--password", default=None, help="Password for encrypted PDFs")
 @click.option(
     "--lang",
@@ -68,6 +75,7 @@ def main(
     no_attachments: bool,
     no_html: bool,
     open_report: bool,
+    preflight_only: bool,
     password: str | None,
     lang: str | None,
     quiet: bool,
@@ -106,6 +114,18 @@ def main(
             )
 
         try:
+            if preflight_only:
+                result = inspect_pdf_print_readiness(
+                    pdf_path=pdf_path,
+                    password=password,
+                    lang=resolved_lang,
+                )
+                if not quiet:
+                    _print_preflight_audit_table(result.get("preflight_audit"), resolved_lang)
+                if result.get("preflight_audit", {}).get("status") == "fail":
+                    sys.exit(2)
+                return
+
             if not quiet:
                 with Progress(
                     SpinnerColumn(),
@@ -153,6 +173,27 @@ def main(
         return
 
     # Batch Multi-PDF mode
+    if preflight_only:
+        if not quiet:
+            b_title = "Verifica Stampa Batch" if is_it else "Batch Print Check"
+            console.print(
+                Panel.fit(
+                    f"[bold cyan]PDF Asset & Metadata Deep Extractor — {b_title}[/bold cyan] [dim]by Linus74 · 2026[/dim]\n"
+                    f"[dim]{len(resolved_pdfs)} PDF[/dim]",
+                    border_style="cyan"
+                )
+            )
+        batch_pf = inspect_batch_print_readiness(
+            pdf_paths=resolved_pdfs,
+            password=password,
+            lang=resolved_lang,
+        )
+        if not quiet:
+            _print_batch_summary(batch_pf, lang=resolved_lang)
+        if batch_pf["failed"] > 0 and batch_pf["succeeded"] == 0:
+            sys.exit(1)
+        return
+
     if not quiet:
         mode_lbl = "Modalità Batch" if is_it else "Batch Mode"
         queue_lbl = "File in coda" if is_it else "Queued files"
@@ -210,6 +251,30 @@ def main(
         sys.exit(1)
 
 
+def _print_preflight_audit_table(audit: dict | None, lang: str = "en"):
+    if not audit:
+        return
+    pf_tbl = Table(
+        title=f"{tr(lang, 'pf_cli_title')} — {format_preflight_badge_label(audit, lang)}",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    pf_tbl.add_column(tr(lang, "pf_th_check"), style="white", width=32)
+    pf_tbl.add_column(tr(lang, "pf_th_status"), style="bold", width=10)
+    pf_tbl.add_column(tr(lang, "pf_th_summary"), style="dim")
+    thresholds = audit.get("thresholds") or {}
+    for chk in audit.get("checks", []):
+        st = chk.get("status", "pass")
+        color_tag = {"pass": "green", "warn": "yellow", "fail": "red"}.get(st, "dim")
+        badge_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(st, "pf_badge_skip")
+        pf_tbl.add_row(
+            tr(lang, f"pf_check_{chk.get('id', '')}"),
+            f"[{color_tag}]{tr(lang, badge_key)}[/{color_tag}]",
+            format_preflight_check(chk, thresholds, lang),
+        )
+    console.print(pf_tbl)
+
+
 def _print_single_summary(result: dict, lang: str = "en"):
     is_it = lang == "it"
     summary = result["summary"]
@@ -265,28 +330,7 @@ def _print_single_summary(result: dict, lang: str = "en"):
         tbl.add_row("Embedded Attachments", f"{summary['attachments_count']} files")
 
     console.print(tbl)
-
-    audit = result.get("preflight_audit")
-    if audit:
-        pf_tbl = Table(
-            title=f"{tr(lang, 'pf_cli_title')} — {format_preflight_badge_label(audit, lang)}",
-            show_header=True,
-            header_style="bold cyan",
-        )
-        pf_tbl.add_column(tr(lang, "pf_th_check"), style="white", width=32)
-        pf_tbl.add_column(tr(lang, "pf_th_status"), style="bold", width=10)
-        pf_tbl.add_column(tr(lang, "pf_th_summary"), style="dim")
-        thresholds = audit.get("thresholds") or {}
-        for chk in audit.get("checks", []):
-            st = chk.get("status", "pass")
-            color_tag = {"pass": "green", "warn": "yellow", "fail": "red"}.get(st, "dim")
-            badge_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(st, "pf_badge_skip")
-            pf_tbl.add_row(
-                tr(lang, f"pf_check_{chk.get('id', '')}"),
-                f"[{color_tag}]{tr(lang, badge_key)}[/{color_tag}]",
-                format_preflight_check(chk, thresholds, lang),
-            )
-        console.print(pf_tbl)
+    _print_preflight_audit_table(result.get("preflight_audit"), lang)
 
     if is_it:
         out_panel = (
@@ -331,13 +375,22 @@ def _print_batch_summary(batch_res: dict, lang: str = "en"):
             pf_col = {"pass": "green", "warn": "yellow", "fail": "red"}.get(pf_st, "dim")
             pf_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(pf_st, "pf_badge_skip")
             counts = f"{s['total_images']} / {s.get('vector_pages_count', 0)} / {s['embedded_fonts']}"
-            folder_name = Path(item["output_directory"]).name
+            folder_name = Path(item["output_directory"]).name if item.get("output_directory") else "-"
             tbl.add_row(item["file_name"], "[green]OK[/green]", f"[{pf_col}]{tr(lang, pf_key)}[/{pf_col}]", counts, folder_name)
         else:
             err_lbl = "Errore" if is_it else "Error"
             tbl.add_row(item["file_name"], f"[red]{err_lbl}[/red]", "-", "-", item.get("error") or "")
 
     console.print(tbl)
+    if not batch_res.get("output_directory"):
+        agg = batch_res["aggregate_summary"]
+        console.print(
+            f"[bold cyan]{tr(lang, 'pf_cli_title')}:[/bold cyan] "
+            f"[green]{agg.get('preflight_pass', 0)} {tr(lang, 'pf_badge_pass')}[/green] · "
+            f"[yellow]{agg.get('preflight_warn', 0)} {tr(lang, 'pf_badge_warn')}[/yellow] · "
+            f"[red]{agg.get('preflight_fail', 0)} {tr(lang, 'pf_badge_fail')}[/red]\n"
+        )
+        return
     if is_it:
         batch_panel = (
             f"[bold green]✓ Batch completato: {batch_res['succeeded']}/{batch_res['total_files']} PDF elaborati.[/bold green]\n"

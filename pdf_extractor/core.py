@@ -382,6 +382,255 @@ def compute_print_readiness_audit(
     }
 
 
+def _open_pdf_documents(
+    pdf_file: Path,
+    password: Optional[str],
+    lang: str,
+) -> tuple[pymupdf.Document, Optional[pikepdf.Pdf]]:
+    """Opens a PDF with PyMuPDF (authenticating if needed) and best-effort pikepdf."""
+    doc = pymupdf.open(str(pdf_file))
+    if doc.is_encrypted and doc.needs_pass:
+        auth = doc.authenticate(password or "")
+        if not auth:
+            doc.close()
+            raise PermissionError(tr(lang, "err_pwd_required"))
+
+    pike_doc = None
+    try:
+        pike_doc = pikepdf.open(str(pdf_file), password=password) if password else pikepdf.open(str(pdf_file))
+    except Exception:
+        pike_doc = None
+
+    return doc, pike_doc
+
+
+def inspect_pdf_print_readiness(
+    pdf_path: str | Path,
+    password: Optional[str] = None,
+    min_dpi: float = 300.0,
+    critical_dpi: float = 150.0,
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """
+    Performs a pure in-memory Pre-Press & Print Readiness inspection without creating
+    output directories or writing any extracted assets to disk.
+    """
+    def _report(msg: str, pct: float):
+        if progress_callback:
+            try:
+                progress_callback(msg, pct)
+            except Exception:
+                pass
+
+    pdf_file = Path(pdf_path).resolve()
+    if not pdf_file.exists():
+        raise FileNotFoundError(f"PDF file not found: {pdf_file}")
+
+    _report(tr(lang, "prog_open"), 0.1)
+    doc, pike_doc = _open_pdf_documents(pdf_file, password, lang)
+    try:
+        raw_meta = doc.metadata or {}
+        _report(tr(lang, "prog_geom"), 0.25)
+        pages = extract_pages_geometry(doc, pike_doc)
+
+        _report(tr(lang, "prog_imgs"), 0.50)
+        images = extract_images(doc, output_dir=None)
+
+        _report(tr(lang, "prog_fonts"), 0.72)
+        fonts = extract_fonts(doc, output_dir=None)
+
+        color_data = {"profiles": [], "spot_colors": []}
+        if pike_doc:
+            _report(tr(lang, "prog_profs"), 0.88)
+            color_data = extract_color_profiles(pike_doc, output_dir=None)
+
+        preflight_audit = compute_print_readiness_audit(
+            pages=pages,
+            images=images,
+            fonts=fonts,
+            color_data=color_data,
+            min_dpi=min_dpi,
+            critical_dpi=critical_dpi,
+        )
+
+        file_size = pdf_file.stat().st_size
+        embedded_fonts = sum(1 for f in fonts if f.get("is_embedded"))
+        subset_fonts = sum(1 for f in fonts if f.get("is_subset"))
+
+        summary = {
+            "file_name": pdf_file.name,
+            "file_size": format_bytes(file_size),
+            "file_size_bytes": file_size,
+            "total_pages": len(doc),
+            "total_images": len(images),
+            "total_fonts": len(fonts),
+            "embedded_fonts": embedded_fonts,
+            "subset_fonts": subset_fonts,
+            "color_profiles_count": len(color_data.get("profiles", [])),
+            "spot_colors_count": len(color_data.get("spot_colors", [])),
+            "attachments_count": 0,
+            "vector_pages_count": 0,
+            "vector_paths_count": 0,
+            "preflight_status": preflight_audit["status"],
+            "preflight_warnings": preflight_audit["counts"]["warn"],
+            "preflight_failures": preflight_audit["counts"]["fail"],
+        }
+
+        _report(tr(lang, "prog_pf_done"), 1.0)
+        return {
+            "mode": "preflight_only",
+            "source_pdf": str(pdf_file),
+            "output_directory": None,
+            "summary": summary,
+            "preflight_audit": preflight_audit,
+            "metadata": {
+                "title": raw_meta.get("title") or None,
+                "author": raw_meta.get("author") or None,
+                "subject": raw_meta.get("subject") or None,
+                "creator": raw_meta.get("creator") or None,
+                "producer": raw_meta.get("producer") or None,
+                "pdf_version": raw_meta.get("format") or "PDF",
+                "security": {"is_encrypted": bool(doc.is_encrypted)},
+                "standards": {},
+            },
+            "pages": pages,
+            "images": images,
+            "fonts": fonts,
+            "vectors": [],
+            "color_management": color_data,
+            "attachments": [],
+        }
+    finally:
+        doc.close()
+        if pike_doc:
+            pike_doc.close()
+
+
+def inspect_batch_print_readiness(
+    pdf_paths: Sequence[str | Path],
+    password: Optional[str] = None,
+    min_dpi: float = 300.0,
+    critical_dpi: float = 150.0,
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    item_callback: Optional[Callable[[int, int, Path, str, Any], None]] = None,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """Runs zero-disk-write Print Readiness inspection across multiple PDFs."""
+    resolved_files = [Path(p).resolve() for p in pdf_paths]
+    total = len(resolved_files)
+    items_results: List[Dict[str, Any]] = []
+    succeeded = 0
+    failed = 0
+    pf_pass = 0
+    pf_warn = 0
+    pf_fail = 0
+    agg_pages = 0
+    agg_images = 0
+    agg_fonts = 0
+    agg_embedded = 0
+    agg_profiles = 0
+
+    for idx, pdf_file in enumerate(resolved_files):
+        if item_callback:
+            try:
+                item_callback(idx, total, pdf_file, "running", None)
+            except Exception:
+                pass
+
+        def _per_file(msg: str, sub_pct: float, _i=idx, _name=pdf_file.name):
+            if progress_callback and total > 0:
+                try:
+                    progress_callback(f"[{_i + 1}/{total}] {_name} — {msg}", (_i + sub_pct) / total)
+                except Exception:
+                    pass
+
+        try:
+            res = inspect_pdf_print_readiness(
+                pdf_path=pdf_file,
+                password=password,
+                min_dpi=min_dpi,
+                critical_dpi=critical_dpi,
+                progress_callback=_per_file,
+                lang=lang,
+            )
+            succeeded += 1
+            s = res["summary"]
+            agg_pages += s.get("total_pages", 0)
+            agg_images += s.get("total_images", 0)
+            agg_fonts += s.get("total_fonts", 0)
+            agg_embedded += s.get("embedded_fonts", 0)
+            agg_profiles += s.get("color_profiles_count", 0)
+            pf_st = s.get("preflight_status", "pass")
+            if pf_st == "fail":
+                pf_fail += 1
+            elif pf_st == "warn":
+                pf_warn += 1
+            else:
+                pf_pass += 1
+
+            items_results.append({
+                "source_pdf": str(pdf_file),
+                "file_name": pdf_file.name,
+                "status": "success",
+                "output_directory": None,
+                "summary": s,
+                "preflight_audit": res["preflight_audit"],
+                "preflight_status": pf_st,
+                "error": None,
+            })
+            if item_callback:
+                try:
+                    item_callback(idx, total, pdf_file, "success", res)
+                except Exception:
+                    pass
+        except Exception as exc:
+            failed += 1
+            err_msg = str(exc)
+            items_results.append({
+                "source_pdf": str(pdf_file),
+                "file_name": pdf_file.name,
+                "status": "error",
+                "output_directory": None,
+                "summary": None,
+                "preflight_audit": None,
+                "preflight_status": "error",
+                "error": err_msg,
+            })
+            if item_callback:
+                try:
+                    item_callback(idx, total, pdf_file, "error", err_msg)
+                except Exception:
+                    pass
+
+    if progress_callback:
+        try:
+            progress_callback(tr(lang, "prog_pf_batch_done", s=succeeded, t=total), 1.0)
+        except Exception:
+            pass
+
+    return {
+        "mode": "batch_preflight_only",
+        "output_directory": None,
+        "total_files": total,
+        "succeeded": succeeded,
+        "failed": failed,
+        "items": items_results,
+        "aggregate_summary": {
+            "total_pages": agg_pages,
+            "total_images": agg_images,
+            "total_fonts": agg_fonts,
+            "embedded_fonts": agg_embedded,
+            "vector_pages_count": 0,
+            "color_profiles_count": agg_profiles,
+            "attachments_count": 0,
+            "preflight_pass": pf_pass,
+            "preflight_warn": pf_warn,
+            "preflight_fail": pf_fail,
+        },
+    }
+
+
 def extract_pdf_assets(
     pdf_path: str | Path,
     output_dir: Optional[str | Path] = None,
@@ -424,23 +673,7 @@ def extract_pdf_assets(
 
     _report(tr(lang, "prog_open"), 0.05)
 
-    # 1. Open with PyMuPDF
-    doc = pymupdf.open(str(pdf_file))
-    if doc.is_encrypted and doc.needs_pass:
-        auth = doc.authenticate(password or "")
-        if not auth:
-            doc.close()
-            raise PermissionError(tr(lang, "err_pwd_required"))
-
-    # 2. Open with pikepdf for low-level inspection
-    pike_doc = None
-    try:
-        if password:
-            pike_doc = pikepdf.open(str(pdf_file), password=password)
-        else:
-            pike_doc = pikepdf.open(str(pdf_file))
-    except Exception:
-        pass
+    doc, pike_doc = _open_pdf_documents(pdf_file, password, lang)
 
     try:
         # Extract metadata and document generation details

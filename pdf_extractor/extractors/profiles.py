@@ -69,13 +69,16 @@ def _parse_icc_header(data: bytes) -> Dict[str, Any]:
 
 def extract_color_profiles(
     pike_doc: Optional[pikepdf.Pdf],
-    output_dir: Path
+    output_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Extracts ICC color profiles into `output_dir / "profiles"` and lists spot colors.
+    When `output_dir` is None, inspects ICC headers and spot inks in memory without writing files.
     """
-    profiles_dir = output_dir / "profiles"
-    profiles_dir.mkdir(parents=True, exist_ok=True)
+    write_files = output_dir is not None
+    profiles_dir = (output_dir / "profiles") if write_files else None
+    if profiles_dir is not None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
 
     extracted_profiles: List[Dict[str, Any]] = []
     seen_hashes: Set[str] = set()
@@ -105,13 +108,14 @@ def extract_color_profiles(
             header_info = _parse_icc_header(raw_bytes)
             safe_desc = sanitize_filename(header_info["description"], max_length=50, fallback=f"profile_{profile_counter}")
             filename = f"profile_{profile_counter:02d}_{safe_desc}.icc"
-            profile_path = profiles_dir / filename
 
-            try:
-                with open(profile_path, "wb") as f:
-                    f.write(raw_bytes)
-            except Exception:
-                continue
+            if write_files and profiles_dir is not None:
+                profile_path = profiles_dir / filename
+                try:
+                    with open(profile_path, "wb") as f:
+                        f.write(raw_bytes)
+                except Exception:
+                    continue
 
             file_size = len(raw_bytes)
             extracted_profiles.append({
