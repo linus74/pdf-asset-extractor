@@ -113,6 +113,275 @@ def inspect_pdf_preflight(
     return info
 
 
+def _build_preflight_image_check(
+    images: Sequence[Dict[str, Any]],
+    extract_imgs: bool,
+    min_dpi: float,
+    critical_dpi: float,
+) -> Dict[str, Any]:
+    if not extract_imgs:
+        return {
+            "id": "image_resolution",
+            "status": "skipped",
+            "reason": "skipped",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"checked": 0, "critical": 0, "warning": 0},
+            "details": [],
+        }
+
+    critical_items: List[Dict[str, Any]] = []
+    warn_items: List[Dict[str, Any]] = []
+    checked = 0
+    affected_pages: set[int] = set()
+
+    for img in images:
+        placements = img.get("placements") or []
+        valid_dpis = [p["dpi_avg"] for p in placements if p.get("dpi_avg") and p["dpi_avg"] > 0]
+        if valid_dpis:
+            eff_dpi = min(valid_dpis)
+        elif img.get("effective_dpi"):
+            eff_dpi = float(img["effective_dpi"])
+        else:
+            continue
+
+        checked += 1
+        pages_list = list(img.get("pages") or [])
+        item = {"file": Path(img.get("filename", "")).name, "dpi": eff_dpi, "pages": pages_list}
+        if eff_dpi < critical_dpi:
+            critical_items.append(item)
+            affected_pages.update(pages_list)
+        elif eff_dpi < min_dpi:
+            warn_items.append(item)
+            affected_pages.update(pages_list)
+
+    if checked == 0:
+        return {
+            "id": "image_resolution",
+            "status": "pass",
+            "reason": "none",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"checked": 0, "critical": 0, "warning": 0},
+            "details": [],
+        }
+
+    issue_count = len(critical_items) + len(warn_items)
+    status = "fail" if critical_items else ("warn" if warn_items else "pass")
+    return {
+        "id": "image_resolution",
+        "status": status,
+        "reason": "issues" if issue_count > 0 else "pass",
+        "issue_count": issue_count,
+        "affected_pages": sorted(affected_pages),
+        "metrics": {"checked": checked, "critical": len(critical_items), "warning": len(warn_items)},
+        "details": (critical_items + warn_items)[:25],
+    }
+
+
+def _classify_image_colorspace(cs_raw: Any, has_cmyk_prof: bool, has_rgb_prof: bool) -> str:
+    """Normalizes PyMuPDF colorspace identifiers ('3'/'DeviceRGB', '4'/'DeviceCMYK', 'ICCBased')."""
+    cs = str(cs_raw or "").strip().lower()
+    if "cmyk" in cs or cs == "4":
+        return "cmyk"
+    if "rgb" in cs or cs == "3":
+        return "rgb"
+    if "icc" in cs:
+        if has_rgb_prof and not has_cmyk_prof:
+            return "rgb"
+        if has_cmyk_prof and not has_rgb_prof:
+            return "cmyk"
+    return "other"
+
+
+def _build_preflight_color_check(
+    images: Sequence[Dict[str, Any]],
+    color_data: Dict[str, Any],
+    extract_imgs: bool,
+    extract_profs: bool,
+) -> Dict[str, Any]:
+    if not extract_imgs and not extract_profs:
+        return {
+            "id": "color_spaces",
+            "status": "skipped",
+            "reason": "skipped",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"rgb": 0, "cmyk": 0},
+            "details": [],
+        }
+
+    profiles = color_data.get("profiles") or []
+    cmyk_profiles = [p for p in profiles if "cmyk" in str(p.get("color_space", "")).lower()]
+    rgb_profiles = [p for p in profiles if "rgb" in str(p.get("color_space", "")).lower()]
+
+    rgb_imgs = []
+    cmyk_imgs = []
+    for img in images:
+        kind = _classify_image_colorspace(img.get("colorspace"), bool(cmyk_profiles), bool(rgb_profiles))
+        if kind == "rgb":
+            rgb_imgs.append(img)
+        elif kind == "cmyk":
+            cmyk_imgs.append(img)
+
+    rgb_count = len(rgb_imgs)
+    cmyk_count = len(cmyk_imgs)
+    affected = sorted({p for img in rgb_imgs for p in (img.get("pages") or [])})
+
+    if rgb_count > 0 and (cmyk_count > 0 or cmyk_profiles):
+        status, reason, issue_count = "warn", "mixed", rgb_count
+    elif rgb_count > 0:
+        status, reason, issue_count = "warn", "rgb_only", rgb_count
+    elif cmyk_count > 0 or cmyk_profiles:
+        status, reason, issue_count = "pass", "pass", 0
+    else:
+        status, reason, issue_count = "pass", "none", 0
+
+    return {
+        "id": "color_spaces",
+        "status": status,
+        "reason": reason,
+        "issue_count": issue_count,
+        "affected_pages": affected if status != "pass" else [],
+        "metrics": {"rgb": rgb_count, "cmyk": cmyk_count},
+        "details": [
+            {"file": Path(img.get("filename", "")).name, "colorspace": img.get("colorspace"), "pages": img.get("pages", [])}
+            for img in (rgb_imgs[:20] if status != "pass" else [])
+        ],
+    }
+
+
+def _build_preflight_bleed_check(pages: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    total = len(pages)
+    if total == 0:
+        return {
+            "id": "bleed_boxes",
+            "status": "pass",
+            "reason": "none",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"total": 0, "with_bleed": 0, "missing": 0},
+            "details": [],
+        }
+
+    missing_pages: List[int] = []
+    for pg in pages:
+        bb = pg.get("bleedbox")
+        ref = pg.get("trimbox") or pg.get("mediabox")
+        has_bleed = False
+        if bb and ref:
+            has_bleed = (
+                (bb.get("width_pt", 0) - ref.get("width_pt", 0) > 1.0)
+                or (bb.get("height_pt", 0) - ref.get("height_pt", 0) > 1.0)
+            )
+        if not has_bleed:
+            missing_pages.append(int(pg.get("page_number", 0)))
+
+    with_bleed = total - len(missing_pages)
+    if not missing_pages:
+        status, reason = "pass", "pass"
+    elif with_bleed > 0:
+        status, reason = "warn", "partial"
+    else:
+        status, reason = "warn", "missing"
+
+    return {
+        "id": "bleed_boxes",
+        "status": status,
+        "reason": reason,
+        "issue_count": len(missing_pages),
+        "affected_pages": missing_pages,
+        "metrics": {"total": total, "with_bleed": with_bleed, "missing": len(missing_pages)},
+        "details": [],
+    }
+
+
+def _build_preflight_fonts_check(fonts: Sequence[Dict[str, Any]], extract_fnts: bool) -> Dict[str, Any]:
+    if not extract_fnts:
+        return {
+            "id": "fonts_embedding",
+            "status": "skipped",
+            "reason": "skipped",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"total": 0, "unembedded": 0, "subsets": 0},
+            "details": [],
+        }
+
+    total = len(fonts)
+    if total == 0:
+        return {
+            "id": "fonts_embedding",
+            "status": "pass",
+            "reason": "none",
+            "issue_count": 0,
+            "affected_pages": [],
+            "metrics": {"total": 0, "unembedded": 0, "subsets": 0},
+            "details": [],
+        }
+
+    unembedded = [f for f in fonts if not f.get("is_embedded")]
+    subsets = sum(1 for f in fonts if f.get("is_subset"))
+    affected = sorted({p for f in unembedded for p in (f.get("pages") or [])})
+
+    return {
+        "id": "fonts_embedding",
+        "status": "fail" if unembedded else "pass",
+        "reason": "unembedded" if unembedded else "pass",
+        "issue_count": len(unembedded),
+        "affected_pages": affected,
+        "metrics": {"total": total, "unembedded": len(unembedded), "subsets": subsets},
+        "details": [
+            {"name": f.get("clean_name") or f.get("basefont"), "pages": f.get("pages", [])}
+            for f in unembedded[:25]
+        ],
+    }
+
+
+def compute_print_readiness_audit(
+    pages: Sequence[Dict[str, Any]],
+    images: Sequence[Dict[str, Any]],
+    fonts: Sequence[Dict[str, Any]],
+    color_data: Dict[str, Any],
+    extract_imgs: bool = True,
+    extract_fnts: bool = True,
+    extract_profs: bool = True,
+    min_dpi: float = 300.0,
+    critical_dpi: float = 150.0,
+) -> Dict[str, Any]:
+    """
+    Computes a structured pre-press / print readiness audit over already-extracted
+    PDF assets without touching UI or external libraries.
+    """
+    checks = [
+        _build_preflight_image_check(images, extract_imgs, min_dpi, critical_dpi),
+        _build_preflight_color_check(images, color_data, extract_imgs, extract_profs),
+        _build_preflight_bleed_check(pages),
+        _build_preflight_fonts_check(fonts, extract_fnts),
+    ]
+
+    counts = {
+        "pass": sum(1 for c in checks if c["status"] == "pass"),
+        "warn": sum(1 for c in checks if c["status"] == "warn"),
+        "fail": sum(1 for c in checks if c["status"] == "fail"),
+        "skipped": sum(1 for c in checks if c["status"] == "skipped"),
+    }
+
+    if counts["fail"] > 0:
+        overall = "fail"
+    elif counts["warn"] > 0:
+        overall = "warn"
+    else:
+        overall = "pass"
+
+    return {
+        "status": overall,
+        "thresholds": {"min_dpi": int(min_dpi), "critical_dpi": int(critical_dpi)},
+        "counts": counts,
+        "checks": checks,
+    }
+
+
 def extract_pdf_assets(
     pdf_path: str | Path,
     output_dir: Optional[str | Path] = None,
@@ -225,6 +494,16 @@ def extract_pdf_assets(
         total_vector_paths = sum(v.get("paths_count", 0) for v in vectors)
         file_size = pdf_file.stat().st_size
 
+        preflight_audit = compute_print_readiness_audit(
+            pages=pages,
+            images=images,
+            fonts=fonts,
+            color_data=color_data,
+            extract_imgs=extract_imgs,
+            extract_fnts=extract_fnts,
+            extract_profs=extract_profs,
+        )
+
         summary = {
             "file_name": pdf_file.name,
             "file_size": format_bytes(file_size),
@@ -239,12 +518,16 @@ def extract_pdf_assets(
             "attachments_count": total_attachments,
             "vector_pages_count": total_vector_pages,
             "vector_paths_count": total_vector_paths,
+            "preflight_status": preflight_audit["status"],
+            "preflight_warnings": preflight_audit["counts"]["warn"],
+            "preflight_failures": preflight_audit["counts"]["fail"],
         }
 
         result = {
             "source_pdf": str(pdf_file),
             "output_directory": str(output_dir),
             "summary": summary,
+            "preflight_audit": preflight_audit,
             "metadata": metadata,
             "pages": pages,
             "images": images,
@@ -336,6 +619,9 @@ def extract_batch_pdfs(
     agg_vectors = 0
     agg_profiles = 0
     agg_attachments = 0
+    pf_pass = 0
+    pf_warn = 0
+    pf_fail = 0
 
     for idx, pdf_file in enumerate(resolved_files):
         if item_callback:
@@ -376,6 +662,13 @@ def extract_batch_pdfs(
             agg_vectors += s.get("vector_pages_count", 0)
             agg_profiles += s.get("color_profiles_count", 0)
             agg_attachments += s.get("attachments_count", 0)
+            pf_status = s.get("preflight_status", "pass")
+            if pf_status == "fail":
+                pf_fail += 1
+            elif pf_status == "warn":
+                pf_warn += 1
+            else:
+                pf_pass += 1
 
             items_results.append({
                 "source_pdf": str(pdf_file),
@@ -385,6 +678,7 @@ def extract_batch_pdfs(
                 "html_report": res.get("html_report"),
                 "json_report": res.get("json_report"),
                 "summary": s,
+                "preflight_status": pf_status,
                 "error": None,
             })
             if item_callback:
@@ -433,6 +727,9 @@ def extract_batch_pdfs(
             "vector_pages_count": agg_vectors,
             "color_profiles_count": agg_profiles,
             "attachments_count": agg_attachments,
+            "preflight_pass": pf_pass,
+            "preflight_warn": pf_warn,
+            "preflight_fail": pf_fail,
         },
     }
 

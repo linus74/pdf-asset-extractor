@@ -30,7 +30,13 @@ from .core import (
 )
 from .utils.helpers import format_bytes
 from .utils.icons import get_ctk_icon
-from .utils.i18n import tr, get_default_language, load_preferences, save_preferences
+from .utils.i18n import (
+    tr,
+    get_default_language,
+    load_preferences,
+    save_preferences,
+    format_preflight_badge_label,
+)
 
 PRESET_KEYS = ("preset_full", "preset_graphics", "preset_fonts", "preset_audit")
 
@@ -692,6 +698,18 @@ class PDFExtractorApp(BaseWindow):
         )
         self.res_title_lbl.pack(side="left")
 
+        self.res_preflight_lbl = ctk.CTkLabel(
+            res_top,
+            text="",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=PALETTE["surface"],
+            text_color=PALETTE["text_muted"],
+            corner_radius=6,
+            padx=8,
+            pady=2
+        )
+        self.res_preflight_lbl.pack(side="right")
+
         self.chips_row = ctk.CTkFrame(self.results_card, fg_color="transparent")
         self.chips_row.pack(fill="x", padx=14, pady=(0, 10))
 
@@ -1223,6 +1241,14 @@ class PDFExtractorApp(BaseWindow):
         self.results_card.configure(fg_color=PALETTE["success_bg"], border_color=PALETTE["success_border"])
         self.res_title_lbl.configure(text=tr(self.lang, "res_done"), text_color=PALETTE["success_text"])
 
+        audit = res.get("preflight_audit")
+        if audit:
+            pf_st = audit.get("status", "pass")
+            pf_color = {"pass": "#10B981", "warn": "#F59E0B", "fail": "#EF4444"}.get(pf_st, PALETTE["text_muted"])
+            self.res_preflight_lbl.configure(text=format_preflight_badge_label(audit, self.lang), text_color=pf_color)
+        else:
+            self.res_preflight_lbl.configure(text="")
+
         for widget in self.chips_row.winfo_children():
             widget.destroy()
 
@@ -1287,6 +1313,19 @@ class PDFExtractorApp(BaseWindow):
             widget.destroy()
 
         agg = res["aggregate_summary"]
+        pf_pass = agg.get("preflight_pass", 0)
+        pf_warn = agg.get("preflight_warn", 0)
+        pf_fail = agg.get("preflight_fail", 0)
+        pf_parts = []
+        if pf_pass:
+            pf_parts.append(f"{pf_pass} {tr(self.lang, 'pf_badge_pass')}")
+        if pf_warn:
+            pf_parts.append(f"{pf_warn} {tr(self.lang, 'pf_badge_warn')}")
+        if pf_fail:
+            pf_parts.append(f"{pf_fail} {tr(self.lang, 'pf_badge_fail')}")
+        pf_batch_col = "#EF4444" if pf_fail else ("#F59E0B" if pf_warn else "#10B981")
+        self.res_preflight_lbl.configure(text=f"Preflight: {' · '.join(pf_parts)}" if pf_parts else "", text_color=pf_batch_col)
+
         chips_spec = [
             (tr(self.lang, "chip_images", n=agg["total_images"]), base_dir),
             (tr(self.lang, "chip_vectors", n=agg["vector_pages_count"]), base_dir),

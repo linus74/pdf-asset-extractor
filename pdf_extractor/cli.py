@@ -13,7 +13,13 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .core import extract_pdf_assets, extract_batch_pdfs, collect_pdf_paths
-from .utils.i18n import get_default_language, SUPPORTED_LANGS
+from .utils.i18n import (
+    get_default_language,
+    SUPPORTED_LANGS,
+    tr,
+    format_preflight_check,
+    format_preflight_badge_label,
+)
 
 if sys.platform == "win32":
     try:
@@ -260,6 +266,28 @@ def _print_single_summary(result: dict, lang: str = "en"):
 
     console.print(tbl)
 
+    audit = result.get("preflight_audit")
+    if audit:
+        pf_tbl = Table(
+            title=f"{tr(lang, 'pf_cli_title')} — {format_preflight_badge_label(audit, lang)}",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        pf_tbl.add_column(tr(lang, "pf_th_check"), style="white", width=32)
+        pf_tbl.add_column(tr(lang, "pf_th_status"), style="bold", width=10)
+        pf_tbl.add_column(tr(lang, "pf_th_summary"), style="dim")
+        thresholds = audit.get("thresholds") or {}
+        for chk in audit.get("checks", []):
+            st = chk.get("status", "pass")
+            color_tag = {"pass": "green", "warn": "yellow", "fail": "red"}.get(st, "dim")
+            badge_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(st, "pf_badge_skip")
+            pf_tbl.add_row(
+                tr(lang, f"pf_check_{chk.get('id', '')}"),
+                f"[{color_tag}]{tr(lang, badge_key)}[/{color_tag}]",
+                format_preflight_check(chk, thresholds, lang),
+            )
+        console.print(pf_tbl)
+
     if is_it:
         out_panel = (
             f"[bold green]✓ Estrazione completata con successo![/bold green]\n\n"
@@ -292,18 +320,22 @@ def _print_batch_summary(batch_res: dict, lang: str = "en"):
     )
     tbl.add_column("File PDF" if is_it else "PDF File", style="white")
     tbl.add_column("Stato" if is_it else "Status", style="bold")
+    tbl.add_column(tr(lang, "batch_th_preflight"), style="bold")
     tbl.add_column("Img / Vet / Font" if is_it else "Img / Vec / Font", style="cyan")
     tbl.add_column("Sottocartella Creata" if is_it else "Created Subfolder", style="dim")
 
     for item in batch_res["items"]:
         if item["status"] == "success":
             s = item["summary"]
+            pf_st = item.get("preflight_status", s.get("preflight_status", "pass"))
+            pf_col = {"pass": "green", "warn": "yellow", "fail": "red"}.get(pf_st, "dim")
+            pf_key = {"pass": "pf_badge_pass", "warn": "pf_badge_warn", "fail": "pf_badge_fail"}.get(pf_st, "pf_badge_skip")
             counts = f"{s['total_images']} / {s.get('vector_pages_count', 0)} / {s['embedded_fonts']}"
             folder_name = Path(item["output_directory"]).name
-            tbl.add_row(item["file_name"], "[green]OK[/green]", counts, folder_name)
+            tbl.add_row(item["file_name"], "[green]OK[/green]", f"[{pf_col}]{tr(lang, pf_key)}[/{pf_col}]", counts, folder_name)
         else:
             err_lbl = "Errore" if is_it else "Error"
-            tbl.add_row(item["file_name"], f"[red]{err_lbl}[/red]", "-", item.get("error") or "")
+            tbl.add_row(item["file_name"], f"[red]{err_lbl}[/red]", "-", "-", item.get("error") or "")
 
     console.print(tbl)
     if is_it:

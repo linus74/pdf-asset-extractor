@@ -295,3 +295,61 @@ def test_i18n_translations_and_locale_folders(tmp_path):
     html_en = Path(res_en["html_report"]).read_text(encoding="utf-8")
     assert '<html lang="en">' in html_en
     assert "Complete Asset Extraction &amp; Forensics Report" in html_en or "Complete Asset Extraction & Forensics Report" in html_en
+
+
+def test_print_readiness_audit(tmp_path):
+    from pdf_extractor.core import compute_print_readiness_audit
+
+    # 1. Synthetic PDF from suite triggers DPI fail (<150 DPI), RGB color warn, and missing bleed warn
+    pdf_path = tmp_path / "audit_doc.pdf"
+    create_comprehensive_test_pdf(pdf_path)
+    res = extract_pdf_assets(pdf_path, output_dir=tmp_path / "out", generate_html=True, lang="en")
+
+    audit = res["preflight_audit"]
+    checks = {c["id"]: c for c in audit["checks"]}
+    assert audit["status"] == "fail"
+    assert checks["image_resolution"]["status"] == "fail"
+    assert checks["color_spaces"]["status"] == "warn"
+    assert checks["bleed_boxes"]["status"] == "warn"
+    assert res["summary"]["preflight_status"] == "fail"
+
+    html_txt = Path(res["html_report"]).read_text(encoding="utf-8")
+    assert 'id="tab-preflight"' in html_txt
+    assert "Pre-Press & Print Readiness Audit" in html_txt
+
+    # 2. Fully compliant print-ready inputs -> status == "pass"
+    clean_audit = compute_print_readiness_audit(
+        pages=[{
+            "page_number": 1,
+            "trimbox": {"width_pt": 595.0, "height_pt": 842.0},
+            "bleedbox": {"width_pt": 612.0, "height_pt": 859.0},
+        }],
+        images=[{
+            "filename": "images/hero.jpg",
+            "colorspace": "DeviceCMYK",
+            "pages": [1],
+            "placements": [{"dpi_avg": 320.0}],
+            "effective_dpi": 320.0,
+        }],
+        fonts=[{"clean_name": "Roboto", "basefont": "Roboto-Regular", "is_embedded": True, "is_subset": False, "pages": [1]}],
+        color_data={"profiles": [], "spot_colors": []},
+    )
+    assert clean_audit["status"] == "pass"
+    assert clean_audit["counts"]["fail"] == 0
+    assert clean_audit["counts"]["warn"] == 0
+
+    # 3. Unembedded font + mixed RGB/CMYK -> fonts fail, colors warn
+    mixed_audit = compute_print_readiness_audit(
+        pages=[{"page_number": 1, "mediabox": {"width_pt": 595.0, "height_pt": 842.0}}],
+        images=[
+            {"filename": "images/a.jpg", "colorspace": "DeviceRGB", "pages": [1], "placements": [{"dpi_avg": 240.0}]},
+            {"filename": "images/b.jpg", "colorspace": "DeviceCMYK", "pages": [1], "placements": [{"dpi_avg": 310.0}]},
+        ],
+        fonts=[{"clean_name": "Helvetica", "basefont": "Helvetica", "is_embedded": False, "is_subset": False, "pages": [1]}],
+        color_data={"profiles": [], "spot_colors": []},
+    )
+    mixed_checks = {c["id"]: c for c in mixed_audit["checks"]}
+    assert mixed_audit["status"] == "fail"
+    assert mixed_checks["image_resolution"]["status"] == "warn"
+    assert mixed_checks["color_spaces"]["reason"] == "mixed"
+    assert mixed_checks["fonts_embedding"]["status"] == "fail"

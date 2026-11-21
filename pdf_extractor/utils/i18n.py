@@ -289,6 +289,45 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "btn_open_pdf_report": "Open PDF Report →",
         "html_disabled_txt": "HTML disabled",
         "btn_folder": "Folder",
+        # Print Readiness Audit (Preflight)
+        "tab_preflight": "Print Check",
+        "preflight_heading": "Pre-Press & Print Readiness Audit",
+        "preflight_desc": "Automated technical verification of image DPI, color spaces, print bleed margins, and font embedding.",
+        "pf_status_pass": "Print Ready",
+        "pf_status_warn": "Warnings ({n})",
+        "pf_status_fail": "Issues ({n})",
+        "pf_badge_pass": "PASS",
+        "pf_badge_warn": "WARN",
+        "pf_badge_fail": "FAIL",
+        "pf_badge_skip": "SKIPPED",
+        "pf_check_image_resolution": "Image Resolution (Effective DPI)",
+        "pf_check_color_spaces": "Color Spaces & Separation",
+        "pf_check_bleed_boxes": "Print Bleed & Trim Geometry",
+        "pf_check_fonts_embedding": "Font Embedding",
+        "pf_res_pass": "All {n} placed image(s) meet the >= {min_dpi} DPI print threshold.",
+        "pf_res_none": "No raster images with placement DPI metrics to check.",
+        "pf_res_skipped": "Image extraction disabled — DPI check skipped.",
+        "pf_res_issues": "{crit} image(s) < {crit_dpi} DPI, {warn} image(s) between {crit_dpi}-{min_dpi} DPI.",
+        "pf_cs_pass": "Consistent print color spaces detected (CMYK/Gray/Spot).",
+        "pf_cs_none": "No RGB color separation warnings detected.",
+        "pf_cs_skipped": "Image/profile extraction disabled — color check skipped.",
+        "pf_cs_mixed": "Mixed color spaces detected: RGB ({rgb}) and CMYK ({cmyk}) images.",
+        "pf_cs_rgb_only": "{rgb} RGB image(s) detected without CMYK assets — verify conversion for offset printing.",
+        "pf_bleed_pass": "All {total} page(s) define a BleedBox extending beyond TrimBox.",
+        "pf_bleed_partial": "{with_bleed}/{total} page(s) have print bleed beyond TrimBox; {missing} missing bleed.",
+        "pf_bleed_missing": "No BleedBox margin beyond TrimBox detected across {total} page(s).",
+        "pf_bleed_none": "No page geometry available.",
+        "pf_fonts_pass": "All {total} font(s) are embedded ({subsets} subset(s)).",
+        "pf_fonts_none": "No font references detected.",
+        "pf_fonts_skipped": "Font extraction disabled — embedding check skipped.",
+        "pf_fonts_fail": "{unemb} non-embedded system font(s) out of {total} — RIP may substitute typefaces.",
+        "pf_pages_affected": "Pages: {pages}",
+        "pf_th_check": "Check",
+        "pf_th_status": "Status",
+        "pf_th_summary": "Details",
+        "pf_th_affected": "Affected Items / Pages",
+        "pf_cli_title": "Print Readiness Audit",
+        "batch_th_preflight": "Preflight",
     },
     "it": {
         # Output subfolder suffix
@@ -512,6 +551,45 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "btn_open_pdf_report": "Apri Report PDF →",
         "html_disabled_txt": "HTML disattivato",
         "btn_folder": "Cartella",
+        # Print Readiness Audit (Preflight)
+        "tab_preflight": "Preflight Stampa",
+        "preflight_heading": "Audit Pre-Stampa & Qualità",
+        "preflight_desc": "Verifica tecnica automatica di DPI immagini, spazi colore, abbondanza di stampa e incorporamento font.",
+        "pf_status_pass": "Pronto Stampa",
+        "pf_status_warn": "Avvisi ({n})",
+        "pf_status_fail": "Critico ({n})",
+        "pf_badge_pass": "OK",
+        "pf_badge_warn": "AVVISO",
+        "pf_badge_fail": "CRITICO",
+        "pf_badge_skip": "SALTATO",
+        "pf_check_image_resolution": "Risoluzione Immagini (DPI effettivi)",
+        "pf_check_color_spaces": "Spazi Colore & Separazione",
+        "pf_check_bleed_boxes": "Abbondanza (BleedBox) & Rifilo",
+        "pf_check_fonts_embedding": "Incorporamento Font",
+        "pf_res_pass": "Tutte le {n} immagini posizionate rispettano la soglia >= {min_dpi} DPI.",
+        "pf_res_none": "Nessuna immagine raster con metriche DPI posizionate da verificare.",
+        "pf_res_skipped": "Estrazione immagini disattivata — controllo DPI saltato.",
+        "pf_res_issues": "{crit} immagini < {crit_dpi} DPI, {warn} immagini tra {crit_dpi} e {min_dpi} DPI.",
+        "pf_cs_pass": "Spazi colore coerenti per stampa rilevati (CMYK/Gray/Spot).",
+        "pf_cs_none": "Nessun avviso di conversione RGB rilevato.",
+        "pf_cs_skipped": "Estrazione immagini/profili disattivata — controllo colori saltato.",
+        "pf_cs_mixed": "Spazi colore misti rilevati: immagini RGB ({rgb}) e CMYK ({cmyk}).",
+        "pf_cs_rgb_only": "{rgb} immagini in RGB senza asset CMYK — verificare conversione per stampa offset.",
+        "pf_bleed_pass": "Tutte le {total} pagine definiscono una BleedBox oltre il TrimBox.",
+        "pf_bleed_partial": "{with_bleed}/{total} pagine hanno abbondanza oltre il TrimBox; {missing} ne sono prive.",
+        "pf_bleed_missing": "Nessuna abbondanza (BleedBox > TrimBox) rilevata su {total} pagine.",
+        "pf_bleed_none": "Nessuna geometria pagina disponibile.",
+        "pf_fonts_pass": "Tutti i {total} font sono incorporati ({subsets} subset).",
+        "pf_fonts_none": "Nessun font rilevato.",
+        "pf_fonts_skipped": "Estrazione font disattivata — controllo incorporamento saltato.",
+        "pf_fonts_fail": "{unemb} font di sistema NON incorporati su {total} — rischio sostituzione in tipografia.",
+        "pf_pages_affected": "Pagine: {pages}",
+        "pf_th_check": "Controllo",
+        "pf_th_status": "Esito",
+        "pf_th_summary": "Dettaglio",
+        "pf_th_affected": "Elementi / Pagine interessate",
+        "pf_cli_title": "Audit Pre-Stampa",
+        "batch_th_preflight": "Preflight",
     },
 }
 
@@ -526,3 +604,63 @@ def tr(lang: str, key: str, **kwargs) -> str:
         except Exception:
             return template
     return template
+
+
+def format_preflight_check(check: Dict[str, Any], thresholds: Dict[str, Any], lang: str = "en") -> str:
+    """Formats a localized human-readable summary line for a single preflight check."""
+    cid = check.get("id", "")
+    reason = check.get("reason", "none")
+    m = check.get("metrics") or {}
+    min_dpi = thresholds.get("min_dpi", 300)
+    crit_dpi = thresholds.get("critical_dpi", 150)
+
+    if cid == "image_resolution":
+        if reason == "skipped":
+            return tr(lang, "pf_res_skipped")
+        if reason == "issues":
+            return tr(lang, "pf_res_issues", crit=m.get("critical", 0), warn=m.get("warning", 0), crit_dpi=crit_dpi, min_dpi=min_dpi)
+        if reason == "pass":
+            return tr(lang, "pf_res_pass", n=m.get("checked", 0), min_dpi=min_dpi)
+        return tr(lang, "pf_res_none")
+
+    if cid == "color_spaces":
+        if reason == "skipped":
+            return tr(lang, "pf_cs_skipped")
+        if reason == "mixed":
+            return tr(lang, "pf_cs_mixed", rgb=m.get("rgb", 0), cmyk=m.get("cmyk", 0))
+        if reason == "rgb_only":
+            return tr(lang, "pf_cs_rgb_only", rgb=m.get("rgb", 0))
+        if reason == "pass":
+            return tr(lang, "pf_cs_pass")
+        return tr(lang, "pf_cs_none")
+
+    if cid == "bleed_boxes":
+        if reason == "pass":
+            return tr(lang, "pf_bleed_pass", total=m.get("total", 0))
+        if reason == "partial":
+            return tr(lang, "pf_bleed_partial", with_bleed=m.get("with_bleed", 0), total=m.get("total", 0), missing=m.get("missing", 0))
+        if reason == "missing":
+            return tr(lang, "pf_bleed_missing", total=m.get("total", 0))
+        return tr(lang, "pf_bleed_none")
+
+    if cid == "fonts_embedding":
+        if reason == "skipped":
+            return tr(lang, "pf_fonts_skipped")
+        if reason == "unembedded":
+            return tr(lang, "pf_fonts_fail", unemb=m.get("unembedded", 0), total=m.get("total", 0))
+        if reason == "pass":
+            return tr(lang, "pf_fonts_pass", total=m.get("total", 0), subsets=m.get("subsets", 0))
+        return tr(lang, "pf_fonts_none")
+
+    return ""
+
+
+def format_preflight_badge_label(audit: Dict[str, Any], lang: str = "en") -> str:
+    """Formats localized overall preflight status label for GUI/HTML/CLI badges."""
+    status = audit.get("status", "pass")
+    counts = audit.get("counts") or {}
+    if status == "fail":
+        return tr(lang, "pf_status_fail", n=counts.get("fail", 1))
+    if status == "warn":
+        return tr(lang, "pf_status_warn", n=counts.get("warn", 1))
+    return tr(lang, "pf_status_pass")

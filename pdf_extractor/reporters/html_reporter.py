@@ -9,7 +9,20 @@ from datetime import datetime
 from urllib.parse import quote
 from pathlib import Path
 from typing import Dict, Any
-from ..utils.i18n import tr
+from ..utils.i18n import tr, format_preflight_check, format_preflight_badge_label
+
+
+_PF_BADGE_MAP = {
+    "pass": ("badge-success", "pf_badge_pass"),
+    "warn": ("badge-warning", "pf_badge_warn"),
+    "fail": ("badge-danger", "pf_badge_fail"),
+    "skipped": ("badge-neutral", "pf_badge_skip"),
+}
+
+
+def _pf_badge_html(status: str, lang: str) -> str:
+    cls, key = _PF_BADGE_MAP.get(status, ("badge-neutral", "pf_badge_skip"))
+    return f'<span class="badge {cls}">{tr(lang, key)}</span>'
 
 
 def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en") -> Path:
@@ -53,6 +66,49 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en
         if sec.get("is_encrypted")
         else f'<span class="badge badge-success">{t("html_open")}</span>'
     )
+
+    # Print Readiness Audit rows & header badge
+    audit = data.get("preflight_audit") or {}
+    pf_overall = audit.get("status", "pass")
+    pf_counts = audit.get("counts") or {}
+    pf_thresholds = audit.get("thresholds") or {"min_dpi": 300, "critical_dpi": 150}
+    pf_header_cls = {"pass": "badge-success", "warn": "badge-warning", "fail": "badge-danger"}.get(pf_overall, "badge-neutral")
+    pf_header_label = html.escape(format_preflight_badge_label(audit, lang)) if audit else t("pf_status_pass")
+    pf_header_badge = (
+        f'<button type="button" class="badge {pf_header_cls}" '
+        f'style="cursor:pointer;" onclick="showTab(\'preflight\')">{pf_header_label}</button>'
+    )
+
+    preflight_rows_html = []
+    for chk in audit.get("checks", []):
+        cid = chk.get("id", "")
+        c_title = html.escape(t(f"pf_check_{cid}"))
+        c_badge = _pf_badge_html(chk.get("status", "pass"), lang)
+        c_summary = html.escape(format_preflight_check(chk, pf_thresholds, lang))
+
+        aff_parts = []
+        for det in (chk.get("details") or [])[:5]:
+            if "dpi" in det:
+                aff_parts.append(f"{det.get('file', '')} ({det['dpi']} DPI)")
+            elif "colorspace" in det:
+                aff_parts.append(f"{det.get('file', '')} [{det['colorspace']}]")
+            elif "name" in det:
+                aff_parts.append(str(det["name"]))
+        if chk.get("affected_pages"):
+            pages_str_pf = ", ".join(str(p) for p in chk["affected_pages"][:12])
+            if len(chk["affected_pages"]) > 12:
+                pages_str_pf += "..."
+            aff_parts.append(t("pf_pages_affected", pages=pages_str_pf))
+        aff_html = "<br>".join(html.escape(part) for part in aff_parts) if aff_parts else '<span class="text-muted">-</span>'
+
+        preflight_rows_html.append(f"""
+        <tr>
+          <td><strong>{c_title}</strong></td>
+          <td>{c_badge}</td>
+          <td>{c_summary}</td>
+          <td><small>{aff_html}</small></td>
+        </tr>
+        """)
 
     # Images cards HTML
     images_cards_html = []
@@ -741,6 +797,7 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en
           <span class="badge badge-info">{pdf_version}</span>
           {' '.join(std_badges)}
           {sec_badge}
+          {pf_header_badge}
         </div>
       </div>
 
@@ -788,13 +845,14 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en
 
     <!-- TABS NAVIGATION -->
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="showTab('images')">🖼️ {t("tab_images")} ({len(images)})</button>
-      <button class="tab-btn" onclick="showTab('vectors')">📐 {t("tab_vectors")} ({len(vectors)})</button>
-      <button class="tab-btn" onclick="showTab('fonts')">🔤 {t("tab_fonts")} ({len(fonts)})</button>
-      <button class="tab-btn" onclick="showTab('profiles')">🎨 {t("tab_profiles")}</button>
-      <button class="tab-btn" onclick="showTab('pages')">📏 {t("tab_pages")} ({len(pages)})</button>
-      <button class="tab-btn" onclick="showTab('attachments')">📎 {t("tab_attachments")} ({len(attachments)})</button>
-      <button class="tab-btn" onclick="showTab('xmp')">ℹ️ {t("tab_xmp")}</button>
+      <button class="tab-btn active" data-tab="images" onclick="showTab('images')">🖼️ {t("tab_images")} ({len(images)})</button>
+      <button class="tab-btn" data-tab="vectors" onclick="showTab('vectors')">📐 {t("tab_vectors")} ({len(vectors)})</button>
+      <button class="tab-btn" data-tab="fonts" onclick="showTab('fonts')">🔤 {t("tab_fonts")} ({len(fonts)})</button>
+      <button class="tab-btn" data-tab="profiles" onclick="showTab('profiles')">🎨 {t("tab_profiles")}</button>
+      <button class="tab-btn" data-tab="pages" onclick="showTab('pages')">📏 {t("tab_pages")} ({len(pages)})</button>
+      <button class="tab-btn" data-tab="preflight" onclick="showTab('preflight')">🩺 {t("tab_preflight")}</button>
+      <button class="tab-btn" data-tab="attachments" onclick="showTab('attachments')">📎 {t("tab_attachments")} ({len(attachments)})</button>
+      <button class="tab-btn" data-tab="xmp" onclick="showTab('xmp')">ℹ️ {t("tab_xmp")}</button>
     </div>
 
     <!-- TAB: IMAGES -->
@@ -851,6 +909,32 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en
       </div>
     </div>
 
+    <!-- TAB: PRINT READINESS (PREFLIGHT) -->
+    <div id="tab-preflight" class="tab-pane">
+      <h3 style="margin-bottom: 6px; font-size: 18px;">{t("preflight_heading")}</h3>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 18px;">{t("preflight_desc")}</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">
+        <span class="badge badge-success">{t("pf_badge_pass")}: {pf_counts.get("pass", 0)}</span>
+        <span class="badge badge-warning">{t("pf_badge_warn")}: {pf_counts.get("warn", 0)}</span>
+        <span class="badge badge-danger">{t("pf_badge_fail")}: {pf_counts.get("fail", 0)}</span>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>{t("pf_th_check")}</th>
+              <th>{t("pf_th_status")}</th>
+              <th>{t("pf_th_summary")}</th>
+              <th>{t("pf_th_affected")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {"".join(preflight_rows_html)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- TAB: ATTACHMENTS -->
     <div id="tab-attachments" class="tab-pane">
       {'<div class="table-container"><table><thead><tr><th>' + t("th_filename") + '</th><th>' + t("th_desc") + '</th><th>' + t("th_size") + '</th><th>' + t("th_source") + '</th><th>' + t("th_download") + '</th></tr></thead><tbody>' + ''.join(attachments_rows_html) + '</tbody></table></div>' if attachments_rows_html else f'<div class="empty-state">{t("empty_attachments")}</div>'}
@@ -893,7 +977,8 @@ def generate_html_report(data: Dict[str, Any], output_dir: Path, lang: str = "en
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       const activePane = document.getElementById('tab-' + tabName);
       if (activePane) activePane.classList.add('active');
-      event.currentTarget.classList.add('active');
+      const activeBtn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+      if (activeBtn) activeBtn.classList.add('active');
     }}
 
     function openModal(src, dims, fmt, sz, cs) {{
@@ -975,6 +1060,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path, lan
                 <div class="text-muted font-code">&rarr; {html.escape(sub_name)}/</div>
               </td>
               <td><span class="badge badge-success">{tr(lang, "status_ok")}</span></td>
+              <td>{_pf_badge_html(item.get("preflight_status", s.get("preflight_status", "pass")), lang)}</td>
               <td>{s.get("total_pages", 0)}</td>
               <td>{s.get("total_images", 0)}</td>
               <td>{s.get("vector_pages_count", 0)}</td>
@@ -998,6 +1084,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path, lan
                 <div style="color:#fca5a5; font-size:12px;">{err_msg}</div>
               </td>
               <td><span class="badge badge-danger">{tr(lang, "status_error")}</span></td>
+              <td>-</td>
               <td>-</td>
               <td>-</td>
               <td>-</td>
@@ -1173,6 +1260,7 @@ def generate_batch_html_report(batch_data: Dict[str, Any], output_dir: Path, lan
             <th>#</th>
             <th>{tr(lang, "th_doc_sub")}</th>
             <th>{tr(lang, "th_status")}</th>
+            <th>{tr(lang, "batch_th_preflight")}</th>
             <th>{tr(lang, "th_pages")}</th>
             <th>{tr(lang, "th_imgs")}</th>
             <th>{tr(lang, "tab_vectors")}</th>
